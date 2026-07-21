@@ -1,18 +1,4 @@
-export enum JobStatus {
-  QUEUED = "QUEUED",
-  DOWNLOADING_AUDIO = "DOWNLOADING_AUDIO",
-  OPTIMIZING_AUDIO = "OPTIMIZING_AUDIO",
-  SPLITTING_AUDIO = "SPLITTING_AUDIO",
-  TRANSCRIBING = "TRANSCRIBING",
-  MERGING_TRANSCRIPT = "MERGING_TRANSCRIPT",
-  CLEANING_TRANSCRIPT = "CLEANING_TRANSCRIPT",
-  GENERATING_NOTES = "GENERATING_NOTES",
-  VALIDATING_NOTES = "VALIDATING_NOTES",
-  SAVING_KNOWLEDGE = "SAVING_KNOWLEDGE",
-  CLEANING_TEMP_FILES = "CLEANING_TEMP_FILES",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
-}
+import { JobStatus } from "@prisma/client";
 
 export enum KnowledgeStatus {
   PENDING = "PENDING",
@@ -39,6 +25,10 @@ export const PROCESSING_STEP_ORDER: JobStatus[] = [
 
 export function progressForStep(step: JobStatus): number {
   const idx = PROCESSING_STEP_ORDER.indexOf(step);
-  if (idx === -1) return 0;
+
+  if (idx === -1) {
+    return 0;
+  }
+
   return Math.round((idx / (PROCESSING_STEP_ORDER.length - 1)) * 100);
 }
