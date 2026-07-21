@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Backend runtime
+temp/
+logs/
+*.log
+
+# Test / coverage
+coverage/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Prisma
+apps/backend/prisma/*.db
+
+# Vite / TS build cache
+node_modules/.tmp/
+*.tsbuildinfo

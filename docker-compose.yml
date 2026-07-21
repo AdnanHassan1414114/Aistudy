@@ -1,0 +1,24 @@
+version: "3.9"
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ala_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ala_user
+      POSTGRES_PASSWORD: ala_password
+      POSTGRES_DB: ai_learning_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - ala_pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: ala_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  ala_pg_data:

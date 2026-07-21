@@ -1,0 +1,146 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+/* ── Design tokens ────────────────────────────────────────────────────────
+   Concept: a graded exam / marked-up transcript. The interview record
+   reads like a paper on a desk; each answer gets a stamped, hand-circled
+   score in the margin the way an instructor marks a test. IBM Plex family
+   throughout keeps the academic tone technical rather than twee. */
+@theme {
+  --font-display: "IBM Plex Serif", Georgia, serif;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-paper: #eeece3;
+  --color-paper-raised: #f7f5ee;
+  --color-ink: #20241f;
+  --color-ink-soft: #565a4e;
+  --color-rule: #cdc6b3;
+  --color-rule-strong: #a89f88;
+  --color-stamp: #b23a2e;
+  --color-stamp-soft: #e7c9c3;
+  --color-accent: #2c4a6e;
+  --color-accent-soft: #d7e0e7;
+  --color-pass: #3f7a5c;
+  --color-pass-soft: #d9e8dd;
+  --color-warn: #a5751f;
+  --color-warn-soft: #ecdcbc;
+  --color-fail: #a4392f;
+  --color-fail-soft: #ecd2ce;
+}
+
+html {
+  background-color: var(--color-paper);
+}
+
+body {
+  margin: 0;
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hand-circled stamp used around headline scores — the page's signature
+   element. Two overlapping ellipses at a slight rotation to read as an
+   imperfect pen stroke rather than a perfect vector circle. */
+.grade-stamp {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.grade-stamp::before,
+.grade-stamp::after {
+  content: "";
+  position: absolute;
+  inset: -14%;
+  border: 2.5px solid var(--color-stamp);
+  border-radius: 52% 48% 47% 53% / 53% 47% 53% 47%;
+}
+.grade-stamp::before {
+  transform: rotate(-4deg);
+  opacity: 0.9;
+}
+.grade-stamp::after {
+  transform: rotate(3deg) scale(1.03);
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card-reveal {
+    animation: card-reveal 220ms ease-out;
+  }
+}
+@keyframes card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+/* ── Syntax highlighting ──────────────────────────────────────────────────
+   Deliberately not the stock highlight.js theme -- these map hljs's token
+   classes onto the existing paper/ink palette so code blocks read as part
+   of the same document rather than a pasted-in foreign widget. */
+.hljs-block code {
+  color: var(--color-paper-raised);
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--color-rule-strong);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-tag {
+  color: var(--color-warn-soft);
+}
+.hljs-string,
+.hljs-attr,
+.hljs-template-tag,
+.hljs-template-variable {
+  color: var(--color-pass-soft);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--color-stamp-soft);
+}
+.hljs-title,
+.hljs-name,
+.hljs-section,
+.hljs-type,
+.hljs-function {
+  color: var(--color-accent-soft);
+  font-weight: 600;
+}
+.hljs-variable,
+.hljs-params {
+  color: var(--color-paper-raised);
+}
+
+/* ── Chat typing indicator ────────────────────────────────────────────── */
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+.typing-dot {
+  animation: typing-dot 1.1s ease-in-out infinite;
+}

@@ -1,0 +1,504 @@
+// Prisma schema for the AI Learning Agent — Milestone 1
+// Designed to be extensible for future milestones (embeddings, chat,
+// interview engine, revision planner) without breaking existing tables.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// USERS
+// Scaffolded now so auth can be wired in later without schema churn.
+// ─────────────────────────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?
+  name         String?
+
+  knowledge      Knowledge[]
+  processingJobs ProcessingJob[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE
+// One processed learning resource. Transcript/notes are editable; history
+// is preserved via KnowledgeVersion.
+// ─────────────────────────────────────────────────────────────────────────
+enum KnowledgeStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Knowledge {
+  id String @id @default(uuid())
+
+  title          String
+  youtubeVideoId String  @unique
+  youtubeUrl     String
+  thumbnail      String?
+  channelName    String?
+  channelUrl     String?
+  description    String? @db.Text
+  duration       Int? // seconds
+  publishedAt    DateTime?
+  language       String?
+
+  transcriptRaw   String? @db.Text
+  transcriptClean String? @db.Text
+  notes           String? @db.Text // latest active markdown
+
+  status          KnowledgeStatus @default(PENDING)
+  processingTime  Int? // milliseconds, total pipeline execution time
+  version         Int             @default(1)
+
+  // ── Milestone 2 (RAG) additions — additive & nullable, does not affect M1 ──
+  category      String? // optional scope tag: Backend / AI / React / System Design ...
+  origin        KnowledgeOrigin  @default(LECTURE) // LECTURE (M1 pipeline) or CHAT_SAVE (saved from an External AI chat answer)
+  chunks        KnowledgeChunk[]
+
+  // AI provenance — kept for reproducibility, useful for future milestones
+  aiProvider    String?
+  aiModel       String?
+  promptVersion String?
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  processingJobs   ProcessingJob[]
+  knowledgeVersions KnowledgeVersion[]
+
+  deletedAt DateTime? // soft delete
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([status])
+  @@index([title])
+  @@index([channelName])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@map("knowledge")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE VERSIONS
+// Every edit to `notes` creates a new immutable version row.
+// ─────────────────────────────────────────────────────────────────────────
+model KnowledgeVersion {
+  id String @id @default(uuid())
+
+  knowledgeId String
+  knowledge   Knowledge @relation(fields: [knowledgeId], references: [id], onDelete: Cascade)
+
+  version  Int
+  notes    String @db.Text
+  editedBy String? // userId, nullable until auth exists
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([knowledgeId, version])
+  @@index([knowledgeId])
+  @@map("knowledge_versions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PROCESSING JOBS
+// Tracks the full lifecycle of one background pipeline run.
+// ─────────────────────────────────────────────────────────────────────────
+enum JobStatus {
+  QUEUED
+  DOWNLOADING_AUDIO
+  OPTIMIZING_AUDIO
+  SPLITTING_AUDIO
+  TRANSCRIBING
+  MERGING_TRANSCRIPT
+  CLEANING_TRANSCRIPT
+  GENERATING_NOTES
+  VALIDATING_NOTES
+  SAVING_KNOWLEDGE
+  CLEANING_TEMP_FILES
+  COMPLETED
+  FAILED
+}
+
+model ProcessingJob {
+  id String @id @default(uuid())
+
+  knowledgeId String
+  knowledge   Knowledge @relation(fields: [knowledgeId], references: [id], onDelete: Cascade)
+
+  status              JobStatus @default(QUEUED)
+  currentStep         JobStatus @default(QUEUED)
+  progressPercentage  Int       @default(0)
+  retryCount          Int       @default(0)
+  estimatedRemainingSeconds Int?
+
+  workerId      String?
+  executionTime Int? // milliseconds — total processing time
+  failureReason String? @db.Text
+
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  logs     ProcessingLog[]
+  aiUsages AiUsageLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([knowledgeId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("processing_jobs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AI USAGE LOG
+// One row per AI provider call — kept minimal (provider, model, stage,
+// timestamp) purely for debugging which model produced what, not for
+// cost/billing analytics.
+// ─────────────────────────────────────────────────────────────────────────
+model AiUsageLog {
+  id String @id @default(uuid())
+
+  jobId String
+  job   ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  stage    String // e.g. "CLEANING_TRANSCRIPT", "GENERATING_NOTES"
+  provider String
+  model    String
+
+  createdAt DateTime @default(now())
+
+  @@index([jobId])
+  @@map("ai_usage_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// PROCESSING LOGS
+// Append-only log of every pipeline event, for observability + debugging.
+// ─────────────────────────────────────────────────────────────────────────
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+}
+
+model ProcessingLog {
+  id String @id @default(uuid())
+
+  jobId String
+  job   ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  step    String
+  message String   @db.Text
+  level   LogLevel @default(INFO)
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([jobId])
+  @@index([level])
+  @@index([createdAt])
+  @@map("processing_logs")
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// MILESTONE 2 — RAG CHAT SYSTEM
+// Everything below is additive. Nothing above this line was modified in a
+// breaking way — Knowledge only gained nullable/defaulted columns.
+// ═════════════════════════════════════════════════════════════════════════
+
+enum KnowledgeOrigin {
+  LECTURE // produced by the Milestone 1 YouTube -> notes pipeline
+  CHAT_SAVE // produced by "Save to Knowledge Base" from an External AI chat answer
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE CHUNKS
+// One retrievable unit of a Knowledge's notes, embedded for pgvector
+// similarity search. The `embedding` column itself is declared here for
+// documentation, but Prisma maps `vector` as Unsupported — all reads/
+// writes of the embedding go through raw SQL in KnowledgeChunkRepository.
+// ─────────────────────────────────────────────────────────────────────────
+model KnowledgeChunk {
+  id String @id @default(uuid())
+
+  knowledgeId String
+  knowledge   Knowledge @relation(fields: [knowledgeId], references: [id], onDelete: Cascade)
+
+  chunkIndex Int
+  heading    String? // top-level markdown heading this chunk falls under
+  section    String? // nested sub-heading, if any
+  content    String  @db.Text
+  tokenCount Int     @default(0)
+
+  embedding      Unsupported("vector(768)")?
+  embeddingModel String?
+
+  createdAt DateTime @default(now())
+
+  @@index([knowledgeId])
+  @@map("knowledge_chunks")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CONVERSATIONS + MESSAGES
+// ─────────────────────────────────────────────────────────────────────────
+model Conversation {
+  id String @id @default(uuid())
+
+  userId String? // no auth in this milestone — defaults to a single implicit user
+  title  String  @default("New chat")
+
+  knowledgeScope String? // e.g. "Backend" | "AI" | "React" | null = All Knowledge
+
+  messages Message[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("conversations")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+enum SourceBadge {
+  PERSONAL_KNOWLEDGE
+  EXTERNAL_AI
+}
+
+enum ConfidenceLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Message {
+  id String @id @default(uuid())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  role    MessageRole
+  content String      @db.Text
+
+  // Populated on ASSISTANT messages only.
+  sourceBadge      SourceBadge?
+  confidence       ConfidenceLevel?
+  topSimilarity    Float?
+  knowledgeRefs    Json? // [{ knowledgeId, title, heading, section, similarity }]
+  externalReason   String? // e.g. "This topic was not found in your personal knowledge."
+  savedToKnowledge Boolean          @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// MILESTONE 3 — INTERVIEW ENGINE
+// Everything below is additive. Nothing above this line is modified.
+// Reuses Knowledge / KnowledgeChunk (via RetrievalService) for context —
+// no separate retrieval or knowledge storage is introduced here.
+// ═════════════════════════════════════════════════════════════════════════
+
+enum InterviewMode {
+  QUICK // "Take my Redis interview" — topic inferred, question count auto-chosen
+  CUSTOM // topic + difficulty + question count + type chosen explicitly
+}
+
+enum InterviewDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum InterviewType {
+  THEORY
+  CODING
+  MIXED
+}
+
+enum InterviewStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// INTERVIEW
+// One interview session. Questions are generated one at a time (see
+// InterviewService) — totalQuestions is the target, currentQuestionNumber
+// tracks how many have been generated/asked so far.
+// ─────────────────────────────────────────────────────────────────────────
+model Interview {
+  id String @id @default(uuid())
+
+  userId String? // no auth in this milestone — defaults to a single implicit user, like Conversation
+
+  topic    String
+  category String? // optional Knowledge.category scope, reused by RetrievalService exactly like chat's knowledgeScope
+
+  mode          InterviewMode       @default(QUICK)
+  difficulty    InterviewDifficulty @default(MEDIUM)
+  interviewType InterviewType       @default(MIXED)
+
+  totalQuestions        Int
+  currentQuestionNumber Int             @default(0) // count of questions generated so far
+  status                InterviewStatus @default(IN_PROGRESS)
+
+  questions    InterviewQuestion[]
+  revisionPlan RevisionPlan?
+  learningPath LearningPath?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("interviews")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// INTERVIEW QUESTION
+// One generated question within an interview. knowledgeRefs mirrors
+// Message.knowledgeRefs — records which retrieved notes grounded this
+// specific question, for transparency/debugging.
+// ─────────────────────────────────────────────────────────────────────────
+model InterviewQuestion {
+  id String @id @default(uuid())
+
+  interviewId String
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  questionNumber Int
+  content        String @db.Text
+  knowledgeRefs  Json? // [{ knowledgeId, title, heading, section, similarity }]
+
+  answer InterviewAnswer?
+
+  createdAt DateTime @default(now())
+
+  @@unique([interviewId, questionNumber])
+  @@index([interviewId])
+  @@map("interview_questions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// INTERVIEW ANSWER
+// One candidate answer per question — 1:1 with InterviewQuestion.
+// ─────────────────────────────────────────────────────────────────────────
+model InterviewAnswer {
+  id String @id @default(uuid())
+
+  interviewQuestionId String            @unique
+  interviewQuestion   InterviewQuestion @relation(fields: [interviewQuestionId], references: [id], onDelete: Cascade)
+
+  content String @db.Text
+
+  answeredAt DateTime @default(now())
+
+  // ── Milestone 4 Part 1 — AI Answer Evaluation ──────────────────────────
+  // Populated automatically right after the answer is saved, by evaluating
+  // `content` against the same retrieved notes the question was grounded
+  // in (never the LLM's general knowledge). Nullable because evaluation
+  // runs after `content` is stored, not atomically with it.
+  overallScore    Int? // 0-10
+  conceptAccuracy Int? // 0-10
+  completeness    Int? // 0-10
+  clarity         Int? // 0-10
+  strengths       Json? // string[]
+  missingTopics   Json? // string[]
+  feedback        String? @db.Text
+  evaluationRaw   Json? // full structured evaluation payload, kept as-is for future milestones
+  evaluatedAt     DateTime?
+
+  @@map("interview_answers")
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// MILESTONE 5 — WEAK AREA DETECTION & REVISION PLANNER (LangGraph)
+// Everything below is additive. Nothing above this line is modified.
+// Reuses Interview / InterviewQuestion / InterviewAnswer (already scored by
+// Milestone 4) and RetrievalService (via the LangGraph revision workflow) —
+// no new retrieval or evaluation logic is introduced here.
+// ─────────────────────────────────────────────────────────────────────────
+// REVISION PLAN
+// One row per Interview — the output of the LangGraph revision workflow
+// that runs automatically once an interview completes. "Regenerate" simply
+// upserts this same row.
+// ─────────────────────────────────────────────────────────────────────────
+model RevisionPlan {
+  id String @id @default(uuid())
+
+  interviewId String    @unique
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  weakTopics   Json // WeakTopicItem[] — prioritized weak-topic list from the AnalyzeWeakAreas node
+  priorityList Json // RevisionPriorityItem[] — { topic, reason, suggestedRevision } from the LLM
+  planMarkdown String @db.Text // concise markdown revision plan, rendered from priorityList
+  relatedNotes Json // RelatedKnowledgeItem[] — notes retrieved per weak topic (RetrievalService)
+
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([interviewId])
+  @@map("revision_plans")
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// MILESTONE 7 — PERSONALIZED LEARNING PATH
+// Everything below is additive. Nothing above this line is modified.
+// Reuses Interview / RevisionPlan (weak topics, priority list, related
+// notes) — no new evaluation, retrieval, or weak-area logic is introduced.
+// ─────────────────────────────────────────────────────────────────────────
+// LEARNING PATH
+// One row per Interview — the output of the LangGraph learning-path
+// workflow, built from the already-generated RevisionPlan. "Regenerate"
+// simply upserts this same row.
+// ─────────────────────────────────────────────────────────────────────────
+model LearningPath {
+  id String @id @default(uuid())
+
+  interviewId String    @unique
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  steps Json // LearningPathStep[] — simple priority-ordered steps built from the RevisionPlan
+
+  generatedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([interviewId])
+  @@map("learning_paths")
+}

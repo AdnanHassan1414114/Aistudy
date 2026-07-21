@@ -1,0 +1,44 @@
+export enum JobStatus {
+  QUEUED = "QUEUED",
+  DOWNLOADING_AUDIO = "DOWNLOADING_AUDIO",
+  OPTIMIZING_AUDIO = "OPTIMIZING_AUDIO",
+  SPLITTING_AUDIO = "SPLITTING_AUDIO",
+  TRANSCRIBING = "TRANSCRIBING",
+  MERGING_TRANSCRIPT = "MERGING_TRANSCRIPT",
+  CLEANING_TRANSCRIPT = "CLEANING_TRANSCRIPT",
+  GENERATING_NOTES = "GENERATING_NOTES",
+  VALIDATING_NOTES = "VALIDATING_NOTES",
+  SAVING_KNOWLEDGE = "SAVING_KNOWLEDGE",
+  CLEANING_TEMP_FILES = "CLEANING_TEMP_FILES",
+  COMPLETED = "COMPLETED",
+  FAILED = "FAILED",
+}
+
+export enum KnowledgeStatus {
+  PENDING = "PENDING",
+  PROCESSING = "PROCESSING",
+  COMPLETED = "COMPLETED",
+  FAILED = "FAILED",
+}
+
+// Ordered pipeline steps — used to compute progressPercentage.
+export const PROCESSING_STEP_ORDER: JobStatus[] = [
+  JobStatus.QUEUED,
+  JobStatus.DOWNLOADING_AUDIO,
+  JobStatus.OPTIMIZING_AUDIO,
+  JobStatus.SPLITTING_AUDIO,
+  JobStatus.TRANSCRIBING,
+  JobStatus.MERGING_TRANSCRIPT,
+  JobStatus.CLEANING_TRANSCRIPT,
+  JobStatus.GENERATING_NOTES,
+  JobStatus.VALIDATING_NOTES,
+  JobStatus.SAVING_KNOWLEDGE,
+  JobStatus.CLEANING_TEMP_FILES,
+  JobStatus.COMPLETED,
+];
+
+export function progressForStep(step: JobStatus): number {
+  const idx = PROCESSING_STEP_ORDER.indexOf(step);
+  if (idx === -1) return 0;
+  return Math.round((idx / (PROCESSING_STEP_ORDER.length - 1)) * 100);
+}
