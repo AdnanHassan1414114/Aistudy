@@ -42,29 +42,43 @@ async function processLecture(job: Job<ProcessLectureJobPayload>): Promise<void>
     if (transcriptClean) {
       log.info("Resuming from previously cleaned transcript");
     } else {
-      await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.DOWNLOADING_AUDIO, "Downloading audio from YouTube");
-      const workspace = await audioService.createJobWorkspace(processingJobId);
-      workspaceRoot = workspace.root;
-      const downloaded = await audioService.downloadAudio(youtubeUrl, workspace.root);
+      if (transcriptRaw) {
+        // A prior attempt already paid for download + transcription but
+        // failed during/after cleaning — resume from the saved raw
+        // transcript instead of re-downloading and re-transcribing audio.
+        log.info("Resuming from previously transcribed raw transcript, skipping audio pipeline");
+      } else {
+        await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.DOWNLOADING_AUDIO, "Downloading audio from YouTube");
+        const workspace = await audioService.createJobWorkspace(processingJobId);
+        workspaceRoot = workspace.root;
+        // yt-dlp now downloads audio-only (never the video track) and applies
+        // the mono/16kHz/loudnorm postprocessing in the same pass, so the
+        // file it returns is already transcription-ready. No separate
+        // OPTIMIZING_AUDIO ffmpeg pass is needed — that used to mean reading
+        // the whole audio file back off disk and writing a second full copy
+        // of it just to resample/normalize.
+        const downloaded = await audioService.downloadAudio(youtubeUrl, workspace.root);
 
-      await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.OPTIMIZING_AUDIO, "Optimizing audio");
-      const optimizedPath = await audioService.optimize(downloaded.filePath, workspace.root);
+        await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.SPLITTING_AUDIO, "Splitting audio into chunks");
+        const chunks = await audioService.splitIfNecessary(downloaded.filePath, workspace.chunks);
 
-      await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.SPLITTING_AUDIO, "Splitting audio into chunks");
-      const chunks = await audioService.splitIfNecessary(optimizedPath, workspace.chunks);
+        await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.TRANSCRIBING, `Transcribing ${chunks.length} chunk(s)`);
+        const rawTranscriptResult = await transcriptionService.transcribeChunks(chunks.length, chunks);
 
-      await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.TRANSCRIBING, `Transcribing ${chunks.length} chunk(s)`);
-      const rawTranscriptResult = await transcriptionService.transcribeChunks(chunks.length, chunks);
+        if (!rawTranscriptResult || rawTranscriptResult.trim().length === 0) {
+          throw new Error("Transcription produced empty output.");
+        }
+        transcriptRaw = rawTranscriptResult;
 
-      if (!rawTranscriptResult || rawTranscriptResult.trim().length === 0) {
-        throw new Error("Transcription produced empty output.");
+        await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.MERGING_TRANSCRIPT, "Merging transcript chunks");
+        // Persisted immediately so a cleaning failure below doesn't force
+        // a retry to redo the (expensive) audio download + transcription.
+        await knowledgeRepository.updateTranscripts(knowledgeId, { transcriptRaw });
       }
-      transcriptRaw = rawTranscriptResult;
 
-      await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.MERGING_TRANSCRIPT, "Merging transcript chunks");
       await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.CLEANING_TRANSCRIPT, "Cleaning transcript");
-      transcriptClean = await transcriptCleaningService.clean(transcriptRaw, processingJobId);
-      await knowledgeRepository.updateTranscripts(knowledgeId, { transcriptRaw, transcriptClean });
+      transcriptClean = await transcriptCleaningService.clean(transcriptRaw as string, processingJobId);
+      await knowledgeRepository.updateTranscripts(knowledgeId, { transcriptClean });
     }
 
     await jobService.advanceStep(processingJobId, knowledgeId, JobStatus.GENERATING_NOTES, "Generating structured notes");

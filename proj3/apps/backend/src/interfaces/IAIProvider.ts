@@ -12,6 +12,13 @@ export interface AICompletionResult {
   completionTokens: number;
   totalTokens: number;
   model: string;
+  /**
+   * Raw provider finish reason ("stop", "length", "content_filter", ...).
+   * "length" means the response was cut off by maxTokens — callers that
+   * need the full, uncut content (e.g. transcript cleaning) must check
+   * this rather than trusting a non-empty `content` string.
+   */
+  finishReason?: string;
 }
 
 export interface AIStreamEvent {

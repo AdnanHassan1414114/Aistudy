@@ -39,6 +39,7 @@ export class OpenAIProvider implements IAIProvider {
       completionTokens: completion.usage?.completion_tokens ?? 0,
       totalTokens: completion.usage?.total_tokens ?? 0,
       model: completion.model,
+      finishReason: choice?.finish_reason,
     };
   }
 

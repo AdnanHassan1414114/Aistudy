@@ -100,6 +100,13 @@ export class FfmpegAudioProvider {
     const numChunks = Math.ceil(fileSizeMB / env.AUDIO_CHUNK_TARGET_MB);
     const rawChunkLength = durationSeconds / numChunks;
     const overlap = env.AUDIO_CHUNK_OVERLAP_SECONDS;
+    // -c copy below stream-copies whatever codec is already in the source
+    // file (wav or mp3, depending on which format the download stage
+    // ended up producing) without re-encoding. The chunk's extension must
+    // match that source codec/container, not be hardcoded — muxing mp3
+    // audio into a file copied as .wav (or vice versa) is a container
+    // mismatch that ffmpeg will reject or mishandle.
+    const sourceExt = path.extname(filePath) || ".wav";
 
     await fs.promises.mkdir(outputDir, { recursive: true });
 
@@ -107,20 +114,31 @@ export class FfmpegAudioProvider {
     for (let i = 0; i < numChunks; i++) {
       const start = Math.max(0, i * rawChunkLength - (i > 0 ? overlap : 0));
       const end = Math.min(durationSeconds, (i + 1) * rawChunkLength + overlap);
-      const chunkPath = path.join(outputDir, `chunk-${i}.wav`);
+      const chunkPath = path.join(outputDir, `chunk-${i}${sourceExt}`);
 
-      await execFileAsync("ffmpeg", [
-        "-y",
-        "-i",
-        filePath,
-        "-ss",
-        start.toFixed(2),
-        "-to",
-        end.toFixed(2),
-        "-c",
-        "copy",
-        chunkPath,
-      ]);
+      try {
+        await execFileAsync("ffmpeg", [
+          "-y",
+          "-i",
+          filePath,
+          "-ss",
+          start.toFixed(2),
+          "-to",
+          end.toFixed(2),
+          "-c",
+          "copy",
+          chunkPath,
+        ]);
+      } catch (err) {
+        logger.error("ffmpeg failed while cutting audio chunk", {
+          filePath,
+          chunkIndex: i,
+          start,
+          end,
+          error: (err as Error).message,
+        });
+        throw AppError.internal("Failed to split audio into chunks.");
+      }
 
       chunks.push({ filePath: chunkPath, startSeconds: start, endSeconds: end, index: i });
     }

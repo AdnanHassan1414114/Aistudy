@@ -8,7 +8,11 @@ import { PaginatedResult, PaginationParams } from "../interfaces";
 const STEP_TIME_ESTIMATES_SECONDS: Record<string, number> = {
   QUEUED: 5,
   DOWNLOADING_AUDIO: 30,
-  OPTIMIZING_AUDIO: 15,
+  // Optimization now happens inline during download (see
+  // ytDlpVideoProvider), so this step is never actually run anymore.
+  // Kept at 0 (rather than removed) so old completed jobs whose logs
+  // still reference this step continue to resolve without special-casing.
+  OPTIMIZING_AUDIO: 0,
   SPLITTING_AUDIO: 5,
   TRANSCRIBING: 60,
   MERGING_TRANSCRIPT: 3,

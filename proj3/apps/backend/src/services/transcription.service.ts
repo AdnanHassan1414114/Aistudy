@@ -19,22 +19,49 @@ export class TranscriptionService {
   }
 
   /**
-   * Transcribes all chunks in parallel. A failed chunk is retried up to
-   * MAX_TRANSCRIPTION_RETRIES times with exponential backoff — the whole
-   * job is only failed if a chunk still fails after retries exhausted.
+   * Transcribes all chunks, up to TRANSCRIPTION_CONCURRENCY at a time. A
+   * failed chunk is retried up to MAX_TRANSCRIPTION_RETRIES times with
+   * jittered exponential backoff — the whole job is only failed if a
+   * chunk still fails after retries exhausted.
    * the merge is validated (order, missing/duplicate chunks,
    * basic sentence continuity) before being accepted; processing aborts
    * if the merge looks unsafe rather than silently producing a broken
    * transcript.
    */
   async transcribeChunks(expectedChunkCount: number, chunks: AudioChunk[]): Promise<string> {
-    const outcomes = await Promise.all(
-      chunks.map((chunk) => this.transcribeWithRetry(chunk))
-    );
+    const outcomes = await this.transcribeWithConcurrencyLimit(chunks, env.TRANSCRIPTION_CONCURRENCY);
 
     this.validateMerge(expectedChunkCount, outcomes);
 
     return this.mergeInOrder(outcomes);
+  }
+
+  /**
+   * Runs transcribeWithRetry across all chunks, but never more than
+   * `limit` in flight at once. An unbounded Promise.all here would fire
+   * every chunk at the transcription API simultaneously — for a long
+   * video that's dozens of concurrent requests, which risks tripping a
+   * rate limit for the whole batch at once (see backoffDelay jitter for
+   * the other half of this fix).
+   */
+  private async transcribeWithConcurrencyLimit(
+    chunks: AudioChunk[],
+    limit: number
+  ): Promise<ChunkTranscriptionOutcome[]> {
+    const outcomes: ChunkTranscriptionOutcome[] = new Array(chunks.length);
+    let nextIndex = 0;
+
+    const worker = async (): Promise<void> => {
+      while (nextIndex < chunks.length) {
+        const currentIndex = nextIndex++;
+        outcomes[currentIndex] = await this.transcribeWithRetry(chunks[currentIndex]);
+      }
+    };
+
+    const workerCount = Math.max(1, Math.min(limit, chunks.length));
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    return outcomes;
   }
 
   private async transcribeWithRetry(chunk: AudioChunk): Promise<ChunkTranscriptionOutcome> {

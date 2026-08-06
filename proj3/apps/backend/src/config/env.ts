@@ -25,8 +25,23 @@ const envSchema = z.object({
 
   TEMP_STORAGE_DIR: z.string().default("./temp"),
   MAX_TRANSCRIPTION_RETRIES: z.coerce.number().default(2),
+  // Caps how many chunks are transcribed concurrently. Uncapped parallelism
+  // means a long video's chunks all hit the transcription API at once —
+  // if that trips a rate limit, every chunk fails together and (without
+  // this cap) retries would also fire together. See TRANSCRIPTION_CONCURRENCY
+  // usage in TranscriptionService.
+  TRANSCRIPTION_CONCURRENCY: z.coerce.number().default(3),
   AUDIO_CHUNK_TARGET_MB: z.coerce.number().default(24),
   AUDIO_CHUNK_OVERLAP_SECONDS: z.coerce.number().default(3),
+
+  // ── Download flow guards ─────────────────────────────────────────────
+  // Videos longer than this are rejected before any download/transcription
+  // cost is incurred (see KnowledgeService.submitForProcessing).
+  MAX_VIDEO_DURATION_MINUTES: z.coerce.number().default(90),
+  // yt-dlp is a child process with no built-in timeout; without one, a
+  // stalled network call can hang a worker slot or an HTTP request forever.
+  YT_DLP_METADATA_TIMEOUT_MS: z.coerce.number().default(30000),
+  YT_DLP_DOWNLOAD_TIMEOUT_MS: z.coerce.number().default(600000),
 
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(30),
