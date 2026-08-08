@@ -13,6 +13,16 @@ export interface AudioChunk {
   startSeconds: number;
   endSeconds: number;
   index: number;
+  /**
+   * Seconds of audio at the START of this chunk's own file that were
+   * ALSO included at the end of the previous chunk (0 for chunk 0, or
+   * for any chunk whose start got clamped to 0 by Math.max below —
+   * clamping means there was nothing before it to overlap with).
+   * Downstream (transcription merge) uses this to drop the duplicated
+   * portion of the transcribed text instead of concatenating both
+   * copies of the same spoken words.
+   */
+  headOverlapSeconds: number;
 }
 
 /**
@@ -94,7 +104,7 @@ export class FfmpegAudioProvider {
     const fileSizeMB = await this.getFileSizeMB(filePath);
 
     if (fileSizeMB <= env.AUDIO_CHUNK_TARGET_MB) {
-      return [{ filePath, startSeconds: 0, endSeconds: durationSeconds, index: 0 }];
+      return [{ filePath, startSeconds: 0, endSeconds: durationSeconds, index: 0, headOverlapSeconds: 0 }];
     }
 
     const numChunks = Math.ceil(fileSizeMB / env.AUDIO_CHUNK_TARGET_MB);
@@ -112,8 +122,15 @@ export class FfmpegAudioProvider {
 
     const chunks: AudioChunk[] = [];
     for (let i = 0; i < numChunks; i++) {
-      const start = Math.max(0, i * rawChunkLength - (i > 0 ? overlap : 0));
+      const idealStart = i * rawChunkLength;
+      const start = Math.max(0, idealStart - (i > 0 ? overlap : 0));
       const end = Math.min(durationSeconds, (i + 1) * rawChunkLength + overlap);
+      // How much of this chunk's own head is duplicate audio already
+      // covered by the tail of the previous chunk. Normally equals
+      // `overlap`, but shrinks (down to 0) when idealStart - overlap
+      // got clamped to 0 above — in that case there was nothing before
+      // this chunk to actually overlap with.
+      const headOverlapSeconds = i > 0 ? idealStart - start : 0;
       const chunkPath = path.join(outputDir, `chunk-${i}${sourceExt}`);
 
       try {
@@ -140,7 +157,7 @@ export class FfmpegAudioProvider {
         throw AppError.internal("Failed to split audio into chunks.");
       }
 
-      chunks.push({ filePath: chunkPath, startSeconds: start, endSeconds: end, index: i });
+      chunks.push({ filePath: chunkPath, startSeconds: start, endSeconds: end, index: i, headOverlapSeconds });
     }
 
     logger.debug("Audio split into chunks", { numChunks, durationSeconds });
