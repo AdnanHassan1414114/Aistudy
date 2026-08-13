@@ -2,6 +2,7 @@ import { aiService } from "./ai.service";
 import { buildCleaningPrompt, CLEANING_PROMPT_VERSION } from "../prompts";
 import { AppError } from "../utils/appError";
 import { logger } from "../utils/logger";
+import { splitTextByCharBudget } from "../utils/textSegmentation";
 
 /** Output cap sent to the AI provider for each cleaning call. */
 const CLEANING_MAX_TOKENS = 8192;
@@ -105,57 +106,10 @@ export class TranscriptCleaningService {
   /**
    * Splits a raw transcript into segments that each stay within
    * SAFE_SEGMENT_CHARS, so no single cleaning call risks hitting the
-   * output token cap. Splits on paragraph breaks first, falling back to
-   * sentence boundaries for a single oversized paragraph — never mid-word,
-   * so technical terms/commands aren't sliced apart.
+   * output token cap.
    */
   private splitForCleaning(rawTranscript: string): string[] {
-    if (rawTranscript.length <= SAFE_SEGMENT_CHARS) {
-      return [rawTranscript];
-    }
-
-    const paragraphs = rawTranscript.split(/\n{2,}/).flatMap((p) => this.splitOversizedParagraph(p));
-
-    const segments: string[] = [];
-    let current = "";
-
-    for (const paragraph of paragraphs) {
-      const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
-      if (candidate.length > SAFE_SEGMENT_CHARS && current) {
-        segments.push(current);
-        current = paragraph;
-      } else {
-        current = candidate;
-      }
-    }
-    if (current.trim().length > 0) {
-      segments.push(current);
-    }
-
-    return segments.length > 0 ? segments : [rawTranscript];
-  }
-
-  /** A transcript may have no paragraph breaks at all (one long run-on
-   *  block from ASR) — fall back to splitting on sentence boundaries. */
-  private splitOversizedParagraph(paragraph: string): string[] {
-    if (paragraph.length <= SAFE_SEGMENT_CHARS) return [paragraph];
-
-    const sentences = paragraph.split(/(?<=[.!?])\s+/);
-    const parts: string[] = [];
-    let current = "";
-
-    for (const sentence of sentences) {
-      const candidate = current ? `${current} ${sentence}` : sentence;
-      if (candidate.length > SAFE_SEGMENT_CHARS && current) {
-        parts.push(current);
-        current = sentence;
-      } else {
-        current = candidate;
-      }
-    }
-    if (current.trim().length > 0) parts.push(current);
-
-    return parts.length > 0 ? parts : [paragraph];
+    return splitTextByCharBudget(rawTranscript, SAFE_SEGMENT_CHARS);
   }
 
   get promptVersion(): string {

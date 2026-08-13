@@ -70,6 +70,50 @@ function splitByHeadings(markdown: string): RawSection[] {
   return sections;
 }
 
+/**
+ * Splits a single oversized paragraph further: first on sentence
+ * boundaries, and if a single "sentence" is still too big (a huge
+ * unbroken blob of text, a large code block, a wall of auto-generated
+ * transcript text with no punctuation breaks), a hard character-count
+ * cut as an absolute last resort.
+ *
+ * Without this, a paragraph with no blank lines inside it had no
+ * fallback at all in `splitLargeSection` below — it was kept as a
+ * single chunk with no upper bound. At query time that oversized chunk
+ * could exceed the chat context budget (RAG_MAX_CONTEXT_CHARS) on its
+ * own, get skipped entirely, and silently send the AI an empty
+ * "Notes:" section for a question its retrieval had genuinely found a
+ * strong match for — producing a confident "this isn't in your notes"
+ * answer for a note that actually covers it.
+ */
+function splitOversizedParagraph(text: string, targetChars: number): string[] {
+  if (text.length <= targetChars) return [text];
+
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const parts: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences) {
+    const candidate = current ? `${current} ${sentence}` : sentence;
+    if (candidate.length > targetChars && current) {
+      parts.push(current);
+      current = sentence;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) parts.push(current);
+
+  // Even a single "sentence" (or the whole text, if there was no
+  // punctuation to split on at all) can still exceed the target —
+  // hard-cut by character count so nothing is ever left unbounded.
+  return parts.flatMap((part) => {
+    if (part.length <= targetChars) return [part];
+    const pieceCount = Math.ceil(part.length / targetChars);
+    return Array.from({ length: pieceCount }, (_, i) => part.slice(i * targetChars, (i + 1) * targetChars));
+  });
+}
+
 /** Further splits an oversized section into token-bounded chunks with overlap. */
 function splitLargeSection(
   section: RawSection,
@@ -82,8 +126,11 @@ function splitLargeSection(
   const targetChars = targetTokens * 4;
   const overlapChars = overlapTokens * 4;
 
-  // Prefer splitting on paragraph boundaries so we don't cut mid-sentence.
-  const paragraphs = section.content.split(/\n{2,}/);
+  // Prefer splitting on paragraph boundaries so we don't cut mid-sentence —
+  // but first guarantee every paragraph is itself within budget, so the
+  // accumulation loop below can never end up holding a single oversized
+  // paragraph with nowhere further to split it.
+  const paragraphs = section.content.split(/\n{2,}/).flatMap((p) => splitOversizedParagraph(p, targetChars));
   const parts: RawSection[] = [];
   let current = "";
 

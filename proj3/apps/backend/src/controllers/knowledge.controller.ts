@@ -10,8 +10,8 @@ import {
 } from "../validators/knowledge.validator";
 
 export const createKnowledge = asyncHandler(async (req: Request, res: Response) => {
-  const { youtubeUrl } = req.body as CreateKnowledgeInput;
-  const result = await knowledgeService.submitForProcessing(youtubeUrl);
+  const { youtubeUrl, category } = req.body as CreateKnowledgeInput;
+  const result = await knowledgeService.submitForProcessing(youtubeUrl, category ?? null);
   sendResponse({
     res,
     statusCode: 202,

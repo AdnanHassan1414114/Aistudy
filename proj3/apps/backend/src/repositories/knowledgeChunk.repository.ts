@@ -129,8 +129,12 @@ export class KnowledgeChunkRepository {
     }
 
     const vectorParam = Prisma.raw(`'${vectorLiteral}'::vector`);
+    // Case/whitespace-insensitive match: "category" is free-text (no enum
+    // or lookup table backing it), so an exact `=` comparison silently
+    // returns zero rows on any casing/whitespace drift between how a scope
+    // was stored vs. selected — indistinguishable from "no matching notes".
     const categoryFilter = options.category
-      ? Prisma.sql`AND k."category" = ${options.category}`
+      ? Prisma.sql`AND LOWER(TRIM(k."category")) = LOWER(TRIM(${options.category}))`
       : Prisma.empty;
     const excludeFilter = options.excludeKnowledgeId
       ? Prisma.sql`AND k."id" != ${options.excludeKnowledgeId}`

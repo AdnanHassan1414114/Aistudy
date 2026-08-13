@@ -17,8 +17,11 @@ export interface RetrievalResult {
  * non-deleted, COMPLETED knowledge only.
  */
 export class RetrievalService {
-  async retrieve(question: string, options: { category?: string | null } = {}): Promise<RetrievalResult> {
-    const embedded = await embeddingService.embedQuery(question);
+  async retrieve(
+    question: string,
+    options: { category?: string | null; signal?: AbortSignal } = {}
+  ): Promise<RetrievalResult> {
+    const embedded = await embeddingService.embedQuery(question, options.signal);
 
     const chunks = await knowledgeChunkRepository.similaritySearch(embedded.embedding, {
       topK: env.RAG_TOP_K,

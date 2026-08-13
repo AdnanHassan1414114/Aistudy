@@ -133,10 +133,10 @@ export function runLearningAgent(input: LearningAgentRequestInput) {
 }
 
 /** POST /knowledge -- submits a YouTube URL for processing. */
-export function createKnowledge(youtubeUrl: string) {
+export function createKnowledge(youtubeUrl: string, category?: string | null) {
   return request<{ knowledgeId: string; jobId: string }>("/knowledge", {
     method: "POST",
-    body: JSON.stringify({ youtubeUrl }),
+    body: JSON.stringify({ youtubeUrl, ...(category ? { category } : {}) }),
   });
 }
 

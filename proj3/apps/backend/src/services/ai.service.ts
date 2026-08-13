@@ -86,6 +86,7 @@ export class AIService {
           totalTokens: result.totalTokens,
           model: result.model,
         },
+        finishReason: result.finishReason,
       });
       return result;
     }
@@ -120,6 +121,13 @@ export class AIService {
         });
         // Never retry once tokens have already reached the client.
         if (emittedAny || attempt >= maxRetries) break;
+        if (signal?.aborted) break; // caller already gone, no point waiting to retry
+        // Same jittered backoff `complete()` and the embedding retry
+        // logic both already use — this loop was retrying immediately
+        // with no pause at all, which is the least effective moment to
+        // retry a rate-limit-style failure (the same limit is still very
+        // likely in effect a millisecond later).
+        await sleep(backoffDelay(attempt));
       }
     }
 

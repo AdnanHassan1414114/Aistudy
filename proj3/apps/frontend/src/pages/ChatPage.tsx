@@ -8,6 +8,7 @@ import {
 } from "../lib/api";
 import type { ChatAnswerSummary, Conversation, KnowledgeScope, Message } from "../types/chat";
 import { KNOWLEDGE_SCOPES } from "../types/chat";
+import { truncateText } from "../lib/format";
 import { ConversationSidebar } from "../components/ConversationSidebar";
 import { ChatMessage } from "../components/ChatMessage";
 import { ChatComposer } from "../components/ChatComposer";
@@ -76,6 +77,13 @@ export function ChatPage() {
     getConversation(id)
       .then(({ conversation, messages: msgs }) => {
         setActiveConversation(conversation);
+        // The composer shows a read-only "scope locked" pill based on
+        // `activeConversation.knowledgeScope`, but requests are actually
+        // sent using the separate `scope` state below — without syncing
+        // it here, the pill can show one scope while every message you
+        // send in this conversation silently searches whatever scope was
+        // last selected somewhere else in the app.
+        setScope((conversation.knowledgeScope as KnowledgeScope | null) ?? "All Topics");
         setMessages(msgs);
       })
       .catch((err) => {
@@ -156,7 +164,7 @@ export function ChatPage() {
             setActiveConversation({
               id: summary.conversationId,
               userId: null,
-              title: question.slice(0, 60),
+              title: truncateText(question, 60),
               knowledgeScope: scope === "All Topics" ? null : scope,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),

@@ -13,7 +13,14 @@ const JSON_SCHEMA_DESCRIPTION = `{
 
 export function buildNoteGenerationPrompt(
   cleanTranscript: string,
-  previousAttemptFeedback?: string[]
+  previousAttemptFeedback?: string[],
+  /**
+   * Set when the transcript was too long for one call and had to be
+   * split (see noteGeneration.service.ts). Tells the model it's only
+   * seeing one part of a longer lecture, so it doesn't need to worry
+   * that content referenced earlier/later is missing from this excerpt.
+   */
+  partInfo?: { index: number; total: number }
 ): { system: string; user: string } {
   const system = `You are an expert technical educator converting a lecture transcript
 into high-quality, structured revision notes.
@@ -64,7 +71,12 @@ ${JSON_SCHEMA_DESCRIPTION}`;
           .join("\n")}`
       : "";
 
-  const user = `Generate structured study notes from this cleaned transcript:\n\n${cleanTranscript}${feedbackBlock}`;
+  const partBlock =
+    partInfo && partInfo.total > 1
+      ? `\n\nNote: this is part ${partInfo.index + 1} of ${partInfo.total} of a single longer lecture transcript, split only because of length — it is not the whole lecture. Generate the same full JSON shape for just this excerpt; the parts will be merged afterward into one document, so don't reference "the rest of the lecture" or assume content outside this excerpt. Also, do NOT mention the part number anywhere in the output (not in the title, summary, headings, or content) — write it as if it were a standalone piece of a single seamless document, since the reader will only ever see the final merged version, never this part in isolation.`
+      : "";
+
+  const user = `Generate structured study notes from this cleaned transcript:\n\n${cleanTranscript}${partBlock}${feedbackBlock}`;
 
   return { system, user };
 }

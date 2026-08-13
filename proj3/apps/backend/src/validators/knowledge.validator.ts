@@ -7,6 +7,12 @@ export const createKnowledgeSchema = z.object({
     .trim()
     .min(1, "youtubeUrl is required")
     .refine(isValidYouTubeUrl, "Must be a valid YouTube video URL"),
+  // Optional at the type level, but the repository/DB column has always
+  // accepted it (CreateKnowledgeData.category) — it just had no way to
+  // reach that layer from this endpoint until now. Free-text like
+  // Conversation.knowledgeScope rather than a hard enum, so the same
+  // string on both sides is what makes chat's scope filter match a note.
+  category: z.string().trim().min(1).max(50).optional(),
 });
 
 export const updateKnowledgeNotesSchema = z.object({

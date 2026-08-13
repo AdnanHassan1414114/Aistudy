@@ -80,6 +80,7 @@ export class GroqProvider implements IAIProvider {
     let completionTokens = 0;
     let totalTokens = 0;
     let model = env.GROQ_MODEL;
+    let finishReason: string | undefined;
 
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta?.content ?? "";
@@ -87,6 +88,7 @@ export class GroqProvider implements IAIProvider {
         content += delta;
         onEvent({ delta, done: false });
       }
+      if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
       if (chunk.model) model = chunk.model;
       if (chunk.usage) {
         promptTokens = chunk.usage.prompt_tokens ?? 0;
@@ -96,8 +98,8 @@ export class GroqProvider implements IAIProvider {
     }
 
     const usage = { promptTokens, completionTokens, totalTokens, model };
-    onEvent({ delta: "", done: true, usage });
+    onEvent({ delta: "", done: true, usage, finishReason });
 
-    return { content, ...usage };
+    return { content, ...usage, finishReason };
   }
 }

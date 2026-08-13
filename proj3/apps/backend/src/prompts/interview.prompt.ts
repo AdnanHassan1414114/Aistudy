@@ -1,6 +1,7 @@
 import { InterviewDifficulty, InterviewType } from "@prisma/client";
 import { env } from "../config/env";
 import { PreviousQA } from "../types";
+import { buildNoteContext } from "../utils/promptContext";
 
 interface ContextChunk {
   knowledgeTitle: string;
@@ -54,23 +55,11 @@ Rules:
 - Respond with ONLY valid JSON (no markdown fences, no commentary) matching exactly this shape:
 { "question": string }`;
 
-  // Same bounded-context construction as buildPersonalKnowledgePrompt: dedupe
-  // chunk content, keep heading path, stay under the shared char budget.
-  const seen = new Set<string>();
-  let context = "";
-  let noteNumber = 0;
-
-  for (const c of chunks) {
-    if (seen.has(c.content)) continue;
-    seen.add(c.content);
-    noteNumber += 1;
-
-    const path = [c.knowledgeTitle, c.heading, c.section].filter(Boolean).join(" > ");
-    const block = `### Note ${noteNumber} — ${path}\n${c.content}`;
-
-    if (context.length + block.length > env.RAG_MAX_CONTEXT_CHARS) break;
-    context += (context ? "\n\n---\n\n" : "") + block;
-  }
+  const context = buildNoteContext(
+    chunks,
+    (c, n) => `### Note ${n} — ${[c.knowledgeTitle, c.heading, c.section].filter(Boolean).join(" > ")}\n${c.content}`,
+    env.RAG_MAX_CONTEXT_CHARS
+  );
 
   const historyBlock =
     previousQA.length === 0

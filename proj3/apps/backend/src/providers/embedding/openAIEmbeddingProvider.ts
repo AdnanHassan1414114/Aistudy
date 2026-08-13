@@ -14,21 +14,24 @@ export class OpenAIEmbeddingProvider implements IEmbeddingProvider {
     this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: env.AI_REQUEST_TIMEOUT_MS });
   }
 
-  async embed(text: string): Promise<EmbeddingResult> {
-    const [result] = await this.embedBatch([text]);
+  async embed(text: string, signal?: AbortSignal): Promise<EmbeddingResult> {
+    const [result] = await this.embedBatch([text], signal);
     return result;
   }
 
-  async embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
+  async embedBatch(texts: string[], signal?: AbortSignal): Promise<EmbeddingResult[]> {
     if (texts.length === 0) return [];
 
     logger.debug("OpenAI embedding requested", { model: env.EMBEDDING_MODEL, count: texts.length });
 
-    const response = await this.client.embeddings.create({
-      model: env.EMBEDDING_MODEL,
-      input: texts,
-      dimensions: env.EMBEDDING_DIMENSIONS,
-    });
+    const response = await this.client.embeddings.create(
+      {
+        model: env.EMBEDDING_MODEL,
+        input: texts,
+        dimensions: env.EMBEDDING_DIMENSIONS,
+      },
+      { signal }
+    );
 
     const totalTokens = response.usage?.total_tokens ?? 0;
     const perItemTokens = Math.ceil(totalTokens / Math.max(texts.length, 1));

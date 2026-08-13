@@ -1,10 +1,19 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createKnowledge, ApiError } from "../lib/api";
+import { KNOWLEDGE_SCOPES } from "../types/chat";
+
+// Reuses the same topic list chat's scope filter already knows about
+// (minus "All Topics", which only means "no filter" there, not a real
+// category to tag a note with) — this is what makes the chat scope
+// dropdown actually find these notes later. Without picking one here, a
+// note stays uncategorized and never surfaces in any scoped chat search.
+const UPLOAD_CATEGORIES = KNOWLEDGE_SCOPES.filter((s) => s !== "All Topics");
 
 export function UrlSubmitForm() {
   const navigate = useNavigate();
   const [url, setUrl] = useState("");
+  const [category, setCategory] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -14,7 +23,7 @@ export function UrlSubmitForm() {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await createKnowledge(url.trim());
+      const result = await createKnowledge(url.trim(), category || null);
       setUrl("");
       navigate(`/knowledge/${result.knowledgeId}`);
     } catch (err) {
@@ -34,6 +43,19 @@ export function UrlSubmitForm() {
           placeholder="Paste a YouTube lecture URL..."
           className="h-11 flex-1 rounded-lg border border-[var(--color-rule)] bg-[var(--color-paper-raised)] px-4 font-body text-sm text-[var(--color-ink)] placeholder:text-[var(--color-ink-soft)] focus:border-[var(--color-accent)] focus:outline-none"
         />
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          aria-label="Topic (optional)"
+          className="h-11 shrink-0 rounded-lg border border-[var(--color-rule)] bg-[var(--color-paper-raised)] px-3 font-body text-sm text-[var(--color-ink)] focus:border-[var(--color-accent)] focus:outline-none"
+        >
+          <option value="">No topic</option>
+          {UPLOAD_CATEGORIES.map((scope) => (
+            <option key={scope} value={scope}>
+              {scope}
+            </option>
+          ))}
+        </select>
         <button
           type="submit"
           disabled={submitting}

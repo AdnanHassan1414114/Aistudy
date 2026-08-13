@@ -40,3 +40,11 @@ export function formatDate(iso: string): string {
 export function formatDateShort(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
+
+/** Truncates to at most `maxLength` Unicode codepoints (not UTF-16 code
+ *  units), so an emoji or other astral character near the cutoff never
+ *  gets split into a broken glyph. Mirrors the backend's `truncateText`. */
+export function truncateText(input: string, maxLength: number): string {
+  const chars = Array.from(input);
+  return chars.length <= maxLength ? input : chars.slice(0, maxLength).join("");
+}

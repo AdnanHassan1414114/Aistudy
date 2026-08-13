@@ -27,6 +27,10 @@ export interface AIStreamEvent {
   done: boolean;
   /** Only populated on the final event. */
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number; model: string };
+  /** Only populated on the final event. Mirrors AICompletionResult.finishReason —
+   *  callers must check this for "length" rather than assuming a stream that
+   *  ended is a stream that finished. */
+  finishReason?: string;
 }
 
 /**

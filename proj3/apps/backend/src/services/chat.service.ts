@@ -4,7 +4,7 @@ import { retrievalService } from "./retrieval.service";
 import { aiService } from "./ai.service";
 import { buildExternalFallbackPrompt, buildPersonalKnowledgePrompt } from "../prompts";
 import { calculateConfidence } from "../utils/confidence";
-import { normalizeWhitespace } from "../utils/text";
+import { normalizeWhitespace, truncateText } from "../utils/text";
 import { env } from "../config/env";
 import { DEFAULT_USER_ID } from "../constants";
 import { logger } from "../utils/logger";
@@ -49,12 +49,19 @@ const EMPTY_ANSWER_FALLBACK =
  * KnowledgeChunkRepository instead.
  */
 export class ChatService {
-  private async getOrCreateConversation(
-    conversationId: string | undefined,
+  private async getOrCreateConversation(    conversationId: string | undefined,
     knowledgeScope: string | null | undefined
   ): Promise<Conversation> {
     if (conversationId) {
-      const existing = await prisma.conversation.findUnique({ where: { id: conversationId } });
+      // Scoped by userId even though it's a single implicit user today —
+      // findUnique-by-id-alone here is a latent IDOR: the day real auth
+      // lands, any authenticated user could pass any conversationId and
+      // read/continue someone else's chat. findFirst + userId keeps this
+      // safe by construction instead of relying on someone remembering to
+      // add the check later.
+      const existing = await prisma.conversation.findFirst({
+        where: { id: conversationId, userId: DEFAULT_USER_ID },
+      });
       if (!existing) throw AppError.notFound("Conversation not found.");
       return existing;
     }
@@ -76,27 +83,100 @@ export class ChatService {
     return { items, page, pageSize, totalItems, totalPages: Math.max(1, Math.ceil(totalItems / pageSize)) };
   }
 
+  /** Default cap for `getConversationWithMessages` (used by the "open a
+   *  conversation" endpoint). Without a cap, opening a very long-running
+   *  conversation loads and renders every message it has ever had, in one
+   *  request — no "load older messages" UI exists yet, so this is a
+   *  partial fix: it stops the worst case (an ever-growing conversation
+   *  getting slower to open every single time) without yet adding
+   *  pagination controls to the UI. 200 is generous for normal chat use. */
+  private static readonly RECENT_MESSAGES_LIMIT = 200;
+
   async getConversationWithMessages(
-    conversationId: string
+    conversationId: string,
+    messageLimit: number = ChatService.RECENT_MESSAGES_LIMIT
   ): Promise<{ conversation: Conversation; messages: Message[] }> {
-    const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, userId: DEFAULT_USER_ID },
+    });
     if (!conversation) throw AppError.notFound("Conversation not found.");
-    const messages = await this.getMessagesForConversation(conversationId);
+    const messages = await this.getRecentMessagesForConversation(conversationId, messageLimit);
     return { conversation, messages };
+  }
+
+  /** Fetches at most `limit` messages, newest-first under the hood so the
+   *  cap keeps the *most recent* history, then returned oldest-first so
+   *  callers can render them top-to-bottom without re-sorting. */
+  private async getRecentMessagesForConversation(conversationId: string, limit: number): Promise<Message[]> {
+    const recent = await prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+    return recent.reverse();
   }
 
   async getMessagesForConversation(conversationId: string): Promise<Message[]> {
     return prisma.message.findMany({ where: { conversationId }, orderBy: { createdAt: "asc" } });
   }
 
+  /** Finds the USER message immediately preceding `message` in its
+   *  conversation — a direct, targeted query rather than loading the
+   *  whole (possibly paginated/capped) message list and scanning it, so
+   *  "Save to Knowledge Base" keeps working correctly for a message deep
+   *  in a long conversation regardless of `getConversationWithMessages`'s
+   *  display cap above. */
+  async getPrecedingUserMessage(message: Message): Promise<Message | null> {
+    return prisma.message.findFirst({
+      where: { conversationId: message.conversationId, role: MessageRole.USER, createdAt: { lt: message.createdAt } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
   async getMessage(messageId: string): Promise<Message> {
-    const message = await prisma.message.findUnique({ where: { id: messageId } });
+    const message = await prisma.message.findFirst({
+      where: { id: messageId, conversation: { userId: DEFAULT_USER_ID } },
+    });
     if (!message) throw AppError.notFound("Message not found.");
     return message;
   }
 
+  /** Conversation only, no messages — used by callers (like "Save to
+   *  Knowledge Base") that only need conversation-level fields such as
+   *  `knowledgeScope`, without paying for a message fetch they don't need. */
+  async getConversationById(conversationId: string): Promise<Conversation> {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, userId: DEFAULT_USER_ID },
+    });
+    if (!conversation) throw AppError.notFound("Conversation not found.");
+    return conversation;
+  }
+
   async markSaved(messageId: string): Promise<void> {
     await prisma.message.update({ where: { id: messageId }, data: { savedToKnowledge: true } });
+  }
+
+  /** Persists whatever content had already streamed to the client when
+   *  generation was stopped mid-flight, so it isn't lost on reload. Best
+   *  effort: the client is already gone by the time this runs, so a
+   *  failure here just gets logged rather than surfaced anywhere. */
+  private async persistStoppedMessage(conversationId: string, content: string): Promise<void> {
+    try {
+      await prisma.message.create({
+        data: {
+          conversationId,
+          role: MessageRole.ASSISTANT,
+          content,
+          externalReason: "Generation was stopped before it finished.",
+        },
+      });
+      await prisma.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
+    } catch (err) {
+      logger.error("Failed to persist stopped chat message", {
+        conversationId,
+        error: (err as Error).message,
+      });
+    }
   }
 
   async streamAnswer(request: ChatRequest, handlers: ChatStreamHandlers, signal?: AbortSignal): Promise<void> {
@@ -123,19 +203,28 @@ export class ChatService {
     if (conversation.title === "New chat") {
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { title: question.slice(0, 60) },
+        data: { title: truncateText(question, 60) },
       });
     }
+
+    // The client may have already disconnected while we were persisting
+    // the user message above — check before paying for an embedding call
+    // and a pgvector search nobody will see the result of.
+    if (signal?.aborted) return;
 
     // ── Retrieval ────────────────────────────────────────────────────────
     let retrieval;
     try {
-      retrieval = await retrievalService.retrieve(question, { category: request.knowledgeScope });
+      retrieval = await retrievalService.retrieve(question, { category: request.knowledgeScope, signal });
     } catch (err) {
+      if (signal?.aborted) return; // cancelled, not a real retrieval failure
       log.error("Retrieval failed", { conversationId: conversation.id, error: (err as Error).message });
       handlers.onError("Vector search failed. Please try again.");
       return;
     }
+
+    // Same check again before the (much more expensive) LLM call.
+    if (signal?.aborted) return;
 
     // Retrieval returning nothing is not an error — it's how the External
     // AI fallback gets triggered automatically.
@@ -155,6 +244,7 @@ export class ChatService {
 
     let fullContent = "";
     let usage: AIStreamEvent["usage"] | undefined;
+    let wasTruncated = false;
 
     try {
       const result = await aiService.streamComplete(
@@ -173,8 +263,32 @@ export class ChatService {
         },
         signal
       );
+      // Prefer the provider's own final `content` when present — it's
+      // built the same way as the accumulated deltas above and should
+      // always match, but this guards against a provider whose returned
+      // `result.content` legitimately diverges from what it streamed.
       fullContent = result.content || fullContent;
+      // "length" means the provider cut the answer off to stay under
+      // CHAT_MAX_TOKENS, not because it was actually finished — without
+      // this check a truncated answer renders identically to a complete
+      // one, with nothing telling the user more was on the way.
+      wasTruncated = result.finishReason === "length";
     } catch (err) {
+      if (signal?.aborted) {
+        // The user clicked "Stop" (or navigated away) — this is not a
+        // provider failure, so it must never be reported as one. Whatever
+        // was already streamed to the client is persisted here so it
+        // survives a reload/conversation switch instead of only existing
+        // in the frontend's local, non-persisted "stopped" bubble.
+        log.info("Chat generation stopped by client", {
+          conversationId: conversation.id,
+          partialLength: fullContent.length,
+        });
+        if (fullContent.trim()) {
+          await this.persistStoppedMessage(conversation.id, fullContent);
+        }
+        return;
+      }
       log.error("Chat completion failed", { conversationId: conversation.id, error: (err as Error).message });
       handlers.onError("The AI provider failed to respond. Please try again.");
       return;
@@ -183,6 +297,10 @@ export class ChatService {
     if (!fullContent.trim()) {
       fullContent = EMPTY_ANSWER_FALLBACK;
       handlers.onDelta(fullContent);
+    } else if (wasTruncated) {
+      const notice = "\n\n*(This answer was cut off because it hit the response length limit.)*";
+      fullContent += notice;
+      handlers.onDelta(notice);
     }
 
     const sourceBadge = usePersonalKnowledge ? SourceBadge.PERSONAL_KNOWLEDGE : SourceBadge.EXTERNAL_AI;

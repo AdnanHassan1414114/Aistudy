@@ -1,5 +1,6 @@
 import { env } from "../config/env";
 import { WeakTopicItem } from "../types";
+import { buildNoteContext } from "../utils/promptContext";
 
 interface ContextChunk {
   topic: string;
@@ -33,19 +34,11 @@ Rules:
 - Respond with ONLY valid JSON (no markdown fences, no commentary) matching exactly this shape:
 { "priorities": [ { "topic": string, "reason": string, "suggestedRevision": string } ] }`;
 
-  const seen = new Set<string>();
-  let context = "";
-
-  for (const c of chunks) {
-    if (seen.has(c.content)) continue;
-    seen.add(c.content);
-
-    const path = [c.knowledgeTitle, c.heading, c.section].filter(Boolean).join(" > ");
-    const block = `### [${c.topic}] ${path}\n${c.content}`;
-
-    if (context.length + block.length > env.RAG_MAX_CONTEXT_CHARS) break;
-    context += (context ? "\n\n---\n\n" : "") + block;
-  }
+  let context = buildNoteContext(
+    chunks,
+    (c) => `### [${c.topic}] ${[c.knowledgeTitle, c.heading, c.section].filter(Boolean).join(" > ")}\n${c.content}`,
+    env.RAG_MAX_CONTEXT_CHARS
+  );
 
   if (!context) {
     context = "(no notes were retrieved for these weak topics)";

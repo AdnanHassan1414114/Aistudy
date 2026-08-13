@@ -24,7 +24,10 @@ export class KnowledgeService {
    * the background worker. Returns immediately — never blocks on the
    * pipeline itself.
    */
-  async submitForProcessing(youtubeUrl: string): Promise<{ knowledgeId: string; jobId: string }> {
+  async submitForProcessing(
+    youtubeUrl: string,
+    category: string | null = null
+  ): Promise<{ knowledgeId: string; jobId: string }> {
     const normalizedUrl = normalizeYouTubeUrl(youtubeUrl);
     if (!normalizedUrl) {
       throw AppError.badRequest("Invalid YouTube URL.");
@@ -78,6 +81,11 @@ export class KnowledgeService {
       duration: metadata.durationSeconds,
       publishedAt: metadata.publishedAt ? new Date(metadata.publishedAt) : null,
       language: metadata.language,
+      // Falls back to whatever category the video already had on a prior
+      // submission (re-processing a failed job, or restoring a soft-deleted
+      // one) rather than wiping it out just because this particular retry
+      // didn't re-specify it.
+      category: category ?? existing?.category ?? null,
     };
 
     // `youtubeVideoId` is globally unique, so a soft-deleted row (or one

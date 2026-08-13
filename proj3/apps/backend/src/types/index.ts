@@ -17,6 +17,8 @@ export const noteSectionSchema = z.object({
   content: z.string().min(1),
 });
 
+export type NoteSection = z.infer<typeof noteSectionSchema>;
+
 export const generatedNotesSchema = z.object({
   title: z.string().min(1),
   summary: z.string().min(1),

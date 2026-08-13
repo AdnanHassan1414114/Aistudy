@@ -1,4 +1,5 @@
 import { env } from "../config/env";
+import { buildNoteContext } from "../utils/promptContext";
 
 interface ContextChunk {
   knowledgeTitle: string;
@@ -30,23 +31,11 @@ Rules:
 - Only include a code block if code is actually relevant to the question.
 - If they want more detail on something specific, they'll ask a follow-up — don't front-load every possible sub-topic.`;
 
-  // Simple context construction: merge chunks, drop exact duplicates,
-  // keep each chunk's heading path, and stay under a size budget.
-  const seen = new Set<string>();
-  let context = "";
-  let noteNumber = 0;
-
-  for (const c of chunks) {
-    if (seen.has(c.content)) continue;
-    seen.add(c.content);
-    noteNumber += 1;
-
-    const path = [c.knowledgeTitle, c.heading, c.section].filter(Boolean).join(" > ");
-    const block = `### Note ${noteNumber} — ${path}\n${c.content}`;
-
-    if (context.length + block.length > env.RAG_MAX_CONTEXT_CHARS) break;
-    context += (context ? "\n\n---\n\n" : "") + block;
-  }
+  const context = buildNoteContext(
+    chunks,
+    (c, n) => `### Note ${n} — ${[c.knowledgeTitle, c.heading, c.section].filter(Boolean).join(" > ")}\n${c.content}`,
+    env.RAG_MAX_CONTEXT_CHARS
+  );
 
   const user = `Notes:\n\n${context}\n\n---\n\nQuestion: ${question}`;
 

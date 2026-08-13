@@ -73,6 +73,7 @@ export class OpenAIProvider implements IAIProvider {
     let completionTokens = 0;
     let totalTokens = 0;
     let model = env.OPENAI_MODEL;
+    let finishReason: string | undefined;
 
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta?.content ?? "";
@@ -80,6 +81,7 @@ export class OpenAIProvider implements IAIProvider {
         content += delta;
         onEvent({ delta, done: false });
       }
+      if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
       if (chunk.model) model = chunk.model;
       if (chunk.usage) {
         promptTokens = chunk.usage.prompt_tokens ?? 0;
@@ -89,8 +91,8 @@ export class OpenAIProvider implements IAIProvider {
     }
 
     const usage = { promptTokens, completionTokens, totalTokens, model };
-    onEvent({ delta: "", done: true, usage });
+    onEvent({ delta: "", done: true, usage, finishReason });
 
-    return { content, ...usage };
+    return { content, ...usage, finishReason };
   }
 }

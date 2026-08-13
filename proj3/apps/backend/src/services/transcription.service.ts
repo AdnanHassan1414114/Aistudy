@@ -9,7 +9,23 @@ import { sleep, backoffDelay } from "../utils/retry";
 interface ChunkTranscriptionOutcome {
   index: number;
   result: TranscriptionResult;
+  /** Copied from the source AudioChunk so the merge step can trim the
+   *  duplicated head of this chunk's transcript without re-threading
+   *  chunk metadata through every call site. */
+  headOverlapSeconds: number;
 }
+
+/**
+ * Small buffer added on top of the chunk's recorded headOverlapSeconds
+ * when deciding which segments to drop. Whisper segment boundaries don't
+ * line up exactly with the ffmpeg cut points (a word spoken right at the
+ * overlap boundary can land a few hundred ms on either side), so cutting
+ * exactly at headOverlapSeconds risks leaving a sliver of duplicate text
+ * behind. Erring slightly toward dropping too much (a fraction of a
+ * second of legitimate new content) is far less noticeable than leaving
+ * a duplicated sentence in the transcript.
+ */
+const OVERLAP_TRIM_BUFFER_SECONDS = 0.5;
 
 export class TranscriptionService {
   private speechProvider: ISpeechProvider;
@@ -70,7 +86,7 @@ export class TranscriptionService {
     for (let attempt = 0; attempt <= env.MAX_TRANSCRIPTION_RETRIES; attempt++) {
       try {
         const result = await this.speechProvider.transcribe(chunk.filePath);
-        return { index: chunk.index, result };
+        return { index: chunk.index, result, headOverlapSeconds: chunk.headOverlapSeconds };
       } catch (err) {
         lastError = err;
         logger.warn("Chunk transcription failed", {
@@ -122,12 +138,65 @@ export class TranscriptionService {
     }
   }
 
+  /**
+   * Chunks are cut with a few seconds of overlap at their boundaries so
+   * a sentence spoken right at the cut point isn't lost (see
+   * ffmpegAudioProvider.splitIntoChunks). That means the overlapping
+   * seconds get transcribed twice — once as the tail of chunk N, once
+   * again as the head of chunk N+1 — and naively joining full chunk
+   * text would duplicate that spoken content in the merged transcript.
+   * For every chunk after the first, drop whichever of its Whisper
+   * segments fall inside the duplicated head window before joining.
+   */
   private mergeInOrder(outcomes: ChunkTranscriptionOutcome[]): string {
-    return outcomes
-      .sort((a, b) => a.index - b.index)
-      .map((o) => o.result.text.trim())
+    const sorted = [...outcomes].sort((a, b) => a.index - b.index);
+
+    const dedupedTexts = sorted.map((o) => this.textExcludingOverlap(o));
+
+    return dedupedTexts
       .join(" ")
       .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /**
+   * Returns this chunk's transcript text with the duplicated head
+   * trimmed off. Falls back to the untrimmed text (with a warning)
+   * when the provider didn't return segment timestamps to trim by —
+   * better to accept a rare duplicated boundary than to silently drop
+   * legitimate content by guessing at a character offset.
+   */
+  private textExcludingOverlap(outcome: ChunkTranscriptionOutcome): string {
+    const { result, headOverlapSeconds, index } = outcome;
+
+    if (headOverlapSeconds <= 0) {
+      return result.text.trim();
+    }
+
+    if (!result.segments || result.segments.length === 0) {
+      logger.warn(
+        "Chunk has a head overlap to trim but no segment timestamps were returned — keeping full text, transcript may contain a duplicated boundary",
+        { chunkIndex: index, headOverlapSeconds }
+      );
+      return result.text.trim();
+    }
+
+    const cutoff = headOverlapSeconds + OVERLAP_TRIM_BUFFER_SECONDS;
+    const kept = result.segments.filter((s) => s.start >= cutoff);
+
+    if (kept.length === 0) {
+      // Every segment in this chunk fell inside the overlap window
+      // (can happen for a very short chunk) — nothing new to add.
+      logger.warn("All segments in chunk fell within the overlap window; contributing no text", {
+        chunkIndex: index,
+        headOverlapSeconds,
+      });
+      return "";
+    }
+
+    return kept
+      .map((s) => s.text.trim())
+      .join(" ")
       .trim();
   }
 }
