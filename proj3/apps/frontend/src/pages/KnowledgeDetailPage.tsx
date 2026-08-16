@@ -6,8 +6,9 @@ import {
   getKnowledgeLatestJob,
   getKnowledgeVersions,
   knowledgePdfUrl,
+  permanentDeleteKnowledge,
+  reindexKnowledge,
   restoreKnowledgeVersion,
-  softDeleteKnowledge,
   updateKnowledgeNotes,
 } from "../lib/api";
 import type { Knowledge, KnowledgeVersion, ProcessingJob } from "../types/knowledge";
@@ -38,6 +39,7 @@ export function KnowledgeDetailPage() {
 
   const [versions, setVersions] = useState<KnowledgeVersion[] | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
 
   const loadKnowledge = useCallback(() => {
     if (!id) return;
@@ -110,14 +112,33 @@ export function KnowledgeDetailPage() {
 
   const handleDelete = async () => {
     if (!id) return;
-    if (!confirm("Delete this lecture and its notes?")) return;
+    // Previously called softDeleteKnowledge, which only ever hid the
+    // lecture -- its notes and (the heaviest part) embedded chunks stayed
+    // in Postgres forever, since there is no "trash"/restore view
+    // anywhere in this app to ever bring a soft-deleted lecture back.
+    // A "Delete" button that doesn't actually free that storage is
+    // misleading, so this now calls the real, permanent delete.
+    if (!confirm("Permanently delete this lecture, its notes, and its transcript? This cannot be undone.")) return;
     setDeleting(true);
     try {
-      await softDeleteKnowledge(id);
+      await permanentDeleteKnowledge(id);
       navigate("/knowledge");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not delete this lecture.");
       setDeleting(false);
+    }
+  };
+
+  const handleReindex = async () => {
+    if (!id) return;
+    setReindexing(true);
+    try {
+      await reindexKnowledge(id);
+      await loadKnowledge();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reindex this lecture.");
+    } finally {
+      setReindexing(false);
     }
   };
 
@@ -189,6 +210,22 @@ export function KnowledgeDetailPage() {
       </div>
 
       {(isProcessing || isFailed) && <JobProgressCard job={job} />}
+
+      {knowledge.status === "COMPLETED" && knowledge.indexingFailedAt && !knowledge.indexedAt && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="font-body text-sm text-amber-900">
+            These notes exist but aren't showing up in chat or interview search yet -- indexing failed.
+          </p>
+          <button
+            type="button"
+            onClick={handleReindex}
+            disabled={reindexing}
+            className="shrink-0 rounded-md border border-amber-400 bg-amber-100 px-3 py-1.5 font-body text-xs font-medium text-amber-900 transition-colors hover:bg-amber-200 disabled:opacity-50"
+          >
+            {reindexing ? "Indexing..." : "Retry indexing"}
+          </button>
+        </div>
+      )}
 
       {knowledge.status === "COMPLETED" && (
         <>
