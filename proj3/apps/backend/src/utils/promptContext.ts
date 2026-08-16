@@ -18,8 +18,15 @@ export function buildNoteContext<T extends { content: string }>(
   let noteNumber = 0;
 
   for (const c of chunks) {
-    if (seen.has(c.content)) continue;
-    seen.add(c.content);
+    // Normalized (whitespace-collapsed, lowercased) key rather than the
+    // raw string — catches near-duplicate chunks (same underlying note
+    // re-saved with trivial formatting differences, or the same source
+    // appearing under two Knowledge rows) that an exact-match `seen` set
+    // would let through as if they were independent corroborating
+    // sources, inflating apparent confidence without adding information.
+    const dedupeKey = c.content.trim().toLowerCase().replace(/\s+/g, " ");
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     noteNumber += 1;
 
     const block = formatBlock(c, noteNumber);
