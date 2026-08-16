@@ -1,4 +1,4 @@
-import type { ConfidenceLevel, KnowledgeReference, MessageRole, MessageStatusType, SourceBadgeType } from "../types/chat";
+import type { ConfidenceLevel, KnowledgeReference, MessageRole, MessageStatusType, SourceBadgeType } from "../types/chat.types.frontend";
 import { Markdown } from "./Markdown";
 import { ChatSourceBadge } from "./ChatSourceBadge";
 import { ConfidenceBadge } from "./ConfidenceBadge";

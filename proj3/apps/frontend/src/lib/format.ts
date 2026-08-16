@@ -1,4 +1,4 @@
-import type { JobStep } from "../types/knowledge";
+import type { JobStep } from "../types/knowledge.types.frontend";
 
 /** Condenses the backend's granular JobStep enum into the step vocabulary
  *  the Knowledge Detail page shows: Queued, Downloading, Optimizing,

@@ -21,18 +21,6 @@ export class AudioService {
     return this.videoProvider.downloadAudio(youtubeUrl, workspaceRoot);
   }
 
-  /**
-   * No longer called from the main pipeline — downloadAudio() now asks
-   * yt-dlp to apply mono/16kHz/loudnorm in the same pass as extraction,
-   * so there's nothing left to optimize by the time we get a file back.
-   * Kept available for callers that feed in audio from somewhere other
-   * than YtDlpVideoProvider (e.g. a future direct-upload flow) and still
-   * need it normalized before transcription.
-   */
-  async optimize(inputPath: string, workspaceRoot: string): Promise<string> {
-    return audioProvider.optimize(inputPath, workspaceRoot);
-  }
-
   async splitIfNecessary(optimizedPath: string, chunksDir: string): Promise<AudioChunk[]> {
     return audioProvider.splitIntoChunks(optimizedPath, chunksDir);
   }

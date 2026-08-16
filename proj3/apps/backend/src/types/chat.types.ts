@@ -13,3 +13,14 @@ export interface KnowledgeReference {
   section: string | null;
   similarity: number;
 }
+
+/** Exact chunk content used to ground an answer, captured verbatim on
+ *  Message.retrievedContext so "Continue" can reuse the identical source
+ *  material instead of re-running retrieval (which could return different
+ *  chunks the second time and make the continuation drift). */
+export interface RetrievedContextChunk {
+  knowledgeTitle: string;
+  heading: string | null;
+  section: string | null;
+  content: string;
+}

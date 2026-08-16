@@ -1,4 +1,4 @@
-import type { ProcessingJob } from "../types/knowledge";
+import type { ProcessingJob } from "../types/knowledge.types.frontend";
 import { JOB_STEP_LABEL, formatEta } from "../lib/format";
 
 export function JobProgressCard({ job }: { job: ProcessingJob | null }) {

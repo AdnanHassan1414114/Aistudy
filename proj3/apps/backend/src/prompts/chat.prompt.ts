@@ -67,6 +67,49 @@ Rules:
 }
 
 /**
+ * Continuation prompt: used by "Continue" when an answer was cut off by
+ * the output-token limit. Deliberately does NOT re-ask the question or
+ * re-run retrieval — it gives the model the exact same grounding chunks
+ * (captured verbatim at the original generation) plus the exact text
+ * already produced, and asks only for what comes next. `usePersonalKnowledge`
+ * picks the same rules (notes-only vs open) the original answer used, so a
+ * continuation can't silently switch modes partway through one answer.
+ */
+export function buildContinuationPrompt(
+  question: string,
+  previousContent: string,
+  chunks: ContextChunk[],
+  usePersonalKnowledge: boolean
+): { system: string; user: string } {
+  const groundingRule = usePersonalKnowledge
+    ? "- Answer ONLY from the notes below, exactly as the first part of this answer did. Do not invent information or use outside knowledge."
+    : "- Answer the same way the first part of this answer did — a knowledgeable friend explaining it out loud.";
+
+  const system = `You are continuing an answer that was cut off because it hit a length limit — you are NOT starting a new answer.
+
+Rules:
+- Do NOT repeat, rephrase, or summarize anything already written below.
+- Do NOT add a new introduction, greeting, or restate the question.
+- Continue naturally from the exact point the previous text stopped, as if you were never interrupted.
+- Match the tone, terminology, and formatting already established.
+${groundingRule}`;
+
+  const context = usePersonalKnowledge
+    ? buildNoteContext(
+        chunks,
+        (c, n) => `### Note ${n} — ${[c.knowledgeTitle, c.heading, c.section].filter(Boolean).join(" > ")}\n${c.content}`,
+        env.RAG_MAX_CONTEXT_CHARS
+      )
+    : "";
+
+  const user = `Original question: ${question}\n\n${
+    usePersonalKnowledge ? `Notes:\n\n${context}\n\n---\n\n` : ""
+  }Answer so far (do not repeat any of this):\n\n${previousContent}\n\n---\n\nContinue the answer from exactly where it left off.`;
+
+  return { system, user };
+}
+
+/**
  * Converts an External-AI answer into structured notes suitable for
  * storing back into the Knowledge Library, when the user chooses
  * "Save to Knowledge Base".

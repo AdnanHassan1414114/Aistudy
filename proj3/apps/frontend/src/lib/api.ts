@@ -186,6 +186,23 @@ export function softDeleteKnowledge(id: string) {
   return request<null>(`/knowledge/${id}`, { method: "DELETE" });
 }
 
+/** DELETE /knowledge/:id/permanent -- unlike softDeleteKnowledge, this
+ *  actually removes the row (and its embedded chunks, via cascade) rather
+ *  than just hiding it. Used by the Detail page's delete action -- there
+ *  is currently no "trash" view anywhere in the UI to ever undo a soft
+ *  delete, so leaving deleted lectures soft-deleted only meant their notes
+ *  and embeddings sat in Postgres forever with no way back to them. */
+export function permanentDeleteKnowledge(id: string) {
+  return request<null>(`/knowledge/${id}/permanent`, { method: "DELETE" });
+}
+
+/** POST /chat/index/:knowledgeId -- (re)runs chunk+embed+store for any
+ *  Knowledge, regardless of origin. Surfaced in the Knowledge Library UI
+ *  for lectures whose auto-indexing failed (see Knowledge.indexingFailedAt). */
+export function reindexKnowledge(knowledgeId: string) {
+  return request<{ chunkCount: number }>(`/chat/index/${knowledgeId}`, { method: "POST" });
+}
+
 /** GET /knowledge/:id/pdf -- not a JSON envelope, so this returns a direct
  *  download URL rather than going through request(). */
 export function knowledgePdfUrl(id: string) {
@@ -206,30 +223,162 @@ export function getConversation(id: string) {
   return request<{ conversation: Conversation; messages: Message[] }>(`/chat/conversations/${id}`);
 }
 
-/** POST /chat/save -- converts an External AI answer into a Knowledge entry. */
+/** POST /chat/save -- converts an External AI answer into a Knowledge entry.
+ *  `indexed: false` means the note was created but isn't searchable yet
+ *  (embedding failed) -- the caller should tell the user, not just show
+ *  a flat "saved" success. */
 export function saveAnswerToKnowledge(messageId: string) {
-  return request<{ knowledgeId: string; title: string }>("/chat/save", {
-    method: "POST",
-    body: JSON.stringify({ messageId }),
-  });
+  return request<{ knowledgeId: string; title: string; indexed: boolean; indexError: string | null }>(
+    "/chat/save",
+    {
+      method: "POST",
+      body: JSON.stringify({ messageId }),
+    }
+  );
 }
 
 export interface ChatStreamHandlers {
   onDelta: (delta: string) => void;
   onDone: (summary: ChatAnswerSummary) => void;
-  onError: (message: string) => void;
+  /** `preserveContent: true` means generation itself succeeded and was
+   *  already fully rendered — only a later step (saving it) failed. The
+   *  caller should keep showing what's on screen rather than clearing it. */
+  onError: (message: string, options?: { preserveContent?: boolean }) => void;
+}
+
+/** No bytes/frames at all for this long ⇒ treat the connection as dead
+ *  rather than leaving the UI in "isStreaming: true" forever. This is an
+ *  IDLE timeout (resets on every chunk received), not a total-duration
+ *  timeout — a slow-but-alive long generation is never penalized, only a
+ *  connection that's gone genuinely silent. */
+const SSE_IDLE_TIMEOUT_MS = 30_000;
+
+class IdleTimeoutError extends Error {
+  constructor() {
+    super("SSE_IDLE_TIMEOUT");
+  }
+}
+
+function raceIdleTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new IdleTimeoutError()), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+/**
+ * Shared SSE-frame consumer for both /chat and /chat/continue -- reads
+ * "event: ...\ndata: ...\n\n" frames as they arrive and forwards each to
+ * the matching handler. Previously this loop could exit cleanly (no
+ * exception, no onDone/onError) if the underlying connection died without
+ * a final frame ever arriving -- the caller's UI would then stay in
+ * "generating..." forever with no recovery short of a manual reload. The
+ * idle-timeout race below is what actually closes that gap.
+ */
+async function consumeSseStream(res: Response, handlers: ChatStreamHandlers): Promise<void> {
+  if (!res.body) {
+    handlers.onError("Chat request failed.");
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let sawTerminalFrame = false;
+
+  try {
+    while (true) {
+      const { done, value } = await raceIdleTimeout(reader.read(), SSE_IDLE_TIMEOUT_MS);
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+
+        let event = "message";
+        let data = "";
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+
+        if (data) {
+          const parsed = JSON.parse(data);
+          if (event === "delta") handlers.onDelta(parsed.delta);
+          else if (event === "done") {
+            sawTerminalFrame = true;
+            handlers.onDone(parsed as ChatAnswerSummary);
+          } else if (event === "error") {
+            sawTerminalFrame = true;
+            handlers.onError(parsed.message ?? "Something went wrong.", {
+              preserveContent: Boolean(parsed.preserveContent),
+            });
+          }
+        }
+
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+
+    // The read loop ended (server closed the connection) without ever
+    // delivering a "done" or "error" frame -- the stream was cut short
+    // mid-generation rather than completing normally. Whatever the
+    // client rendered from deltas so far is real (the server was
+    // genuinely producing it), so this is reported the same way a
+    // persistence failure is: keep the content, tell the user plainly.
+    if (!sawTerminalFrame) {
+      handlers.onError(
+        "The connection ended before the answer finished. What's shown may be incomplete -- check your conversation history.",
+        { preserveContent: true }
+      );
+    }
+  } catch (err) {
+    if ((err as Error).name === "AbortError") return;
+    if (err instanceof IdleTimeoutError) {
+      try {
+        await reader.cancel();
+      } catch {
+        // best effort -- the connection is already presumed dead
+      }
+      handlers.onError(
+        "Connection appears to have been lost. What's shown may be incomplete -- check your conversation history.",
+        { preserveContent: true }
+      );
+      return;
+    }
+    handlers.onError("Connection to the AI was interrupted. Please try again.");
+  }
 }
 
 /**
  * POST /chat -- reads the backend's Server-Sent Events stream via fetch()
- * (not EventSource, since EventSource can't send a POST body). Parses raw
- * "event: ...\ndata: ...\n\n" frames as they arrive and forwards each one
- * to the matching handler. Passing `signal` lets the caller cancel
- * generation mid-stream (Stop Generation) -- the backend already tears
- * down its AbortController on `req.on("close")`.
+ * (not EventSource, since EventSource can't send a POST body). Passing
+ * `signal` lets the caller cancel generation mid-stream (Stop Generation)
+ * -- the backend already tears down its AbortController on `req.on("close")`.
  */
 export async function streamChat(
-  payload: { question: string; conversationId?: string; knowledgeScope?: string | null },
+  payload: {
+    question: string;
+    conversationId?: string;
+    knowledgeScope?: string | null;
+    /** Required client-generated idempotency key — pass a fresh UUID per
+     *  send so a network-level retry of this exact request can't create a
+     *  duplicate message pair server-side. Required (not optional): an
+     *  optional key gave zero protection to a caller that forgot to send
+     *  one, which is exactly what happened before this was tightened. */
+    clientRequestId: string;
+  },
   handlers: ChatStreamHandlers,
   signal?: AbortSignal
 ): Promise<void> {
@@ -259,42 +408,48 @@ export async function streamChat(
     return;
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  await consumeSseStream(res, handlers);
+}
 
+/**
+ * POST /chat/continue -- extends a TRUNCATED message with its missing
+ * remainder. Same SSE contract as streamChat (delta/done/error), but
+ * `onDone`'s messageId is the SAME id the caller passed in -- the caller
+ * is expected to append the streamed deltas onto that existing message
+ * rather than create a new bubble.
+ */
+export async function continueChat(
+  messageId: string,
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal
+): Promise<void> {
+  let res: Response;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let boundary = buffer.indexOf("\n\n");
-      while (boundary !== -1) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-
-        let event = "message";
-        let data = "";
-        for (const line of frame.split("\n")) {
-          if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trim();
-        }
-
-        if (data) {
-          const parsed = JSON.parse(data);
-          if (event === "delta") handlers.onDelta(parsed.delta);
-          else if (event === "done") handlers.onDone(parsed as ChatAnswerSummary);
-          else if (event === "error") handlers.onError(parsed.message ?? "Something went wrong.");
-        }
-
-        boundary = buffer.indexOf("\n\n");
-      }
-    }
+    res = await fetch(`${BASE_URL}/chat/continue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId }),
+      signal,
+    });
   } catch (err) {
     if ((err as Error).name === "AbortError") return;
-    handlers.onError("Connection to the AI was interrupted. Please try again.");
+    handlers.onError("Could not reach the server. Please try again.");
+    return;
   }
+
+  if (!res.ok || !res.body) {
+    let message = "Continue request failed.";
+    try {
+      const body = (await res.json()) as ApiEnvelope<unknown>;
+      message = body.message ?? message;
+    } catch {
+      // response wasn't JSON -- keep the default message
+    }
+    handlers.onError(message);
+    return;
+  }
+
+  await consumeSseStream(res, handlers);
 }
 
 export { ApiError };

@@ -1,4 +1,4 @@
-import type { KnowledgeStatus } from "../types/knowledge";
+import type { KnowledgeStatus } from "../types/knowledge.types.frontend";
 
 const STATUS_STYLE: Record<KnowledgeStatus, string> = {
   COMPLETED: "text-[var(--color-pass)] border-[var(--color-pass)]/40 bg-[var(--color-pass-soft)]",

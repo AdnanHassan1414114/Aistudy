@@ -7,8 +7,8 @@ import {
   saveAnswerToKnowledge,
   streamChat,
 } from "../lib/api";
-import type { ChatAnswerSummary, Conversation, KnowledgeScope, Message } from "../types/chat";
-import { KNOWLEDGE_SCOPES } from "../types/chat";
+import type { ChatAnswerSummary, Conversation, KnowledgeScope, Message } from "../types/chat.types.frontend";
+import { KNOWLEDGE_SCOPES } from "../types/chat.types.frontend";
 import { truncateText } from "../lib/format";
 import { ConversationSidebar } from "../components/ConversationSidebar";
 import { ChatMessage } from "../components/ChatMessage";

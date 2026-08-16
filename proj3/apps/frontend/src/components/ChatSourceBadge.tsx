@@ -1,4 +1,4 @@
-import type { SourceBadgeType } from "../types/chat";
+import type { SourceBadgeType } from "../types/chat.types.frontend";
 
 // Named ChatSourceBadge (rather than SourceBadge) to avoid colliding with
 // StatusBadge, which already owns knowledge-processing status styling.

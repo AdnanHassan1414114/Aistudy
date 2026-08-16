@@ -1,4 +1,4 @@
-import type { KnowledgeStatus } from "../types/knowledge";
+import type { KnowledgeStatus } from "../types/knowledge.types.frontend";
 
 const STATUS_OPTIONS: { value: KnowledgeStatus | "ALL"; label: string }[] = [
   { value: "ALL", label: "All statuses" },

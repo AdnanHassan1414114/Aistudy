@@ -1,4 +1,4 @@
-import { KNOWLEDGE_SCOPES, type KnowledgeScope } from "../types/chat";
+import { KNOWLEDGE_SCOPES, type KnowledgeScope } from "../types/chat.types.frontend";
 
 export function ChatComposer({
   value,

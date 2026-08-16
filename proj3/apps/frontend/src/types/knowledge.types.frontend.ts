@@ -38,6 +38,14 @@ export interface Knowledge {
   processingTime: number | null;
   version: number;
   category: string | null;
+  origin: "LECTURE" | "CHAT_SAVE";
+  /** When RAG indexing (chunk + embed + store) last succeeded/failed.
+   *  `status === "COMPLETED"` only means the lecture pipeline finished --
+   *  it says nothing about whether these notes are actually searchable
+   *  in chat/interview retrieval, which is what these two track. Both
+   *  null means indexing hasn't run yet. */
+  indexedAt: string | null;
+  indexingFailedAt: string | null;
   aiProvider: string | null;
   aiModel: string | null;
   promptVersion: string | null;

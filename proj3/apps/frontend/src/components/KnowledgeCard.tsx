@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { Knowledge } from "../types/knowledge";
+import type { Knowledge } from "../types/knowledge.types.frontend";
 import { StatusBadge } from "./StatusBadge";
 import { formatDateShort, formatDuration } from "../lib/format";
 

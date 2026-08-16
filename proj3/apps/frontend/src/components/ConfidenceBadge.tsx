@@ -1,4 +1,4 @@
-import type { ConfidenceLevel } from "../types/chat";
+import type { ConfidenceLevel } from "../types/chat.types.frontend";
 
 const STYLE: Record<ConfidenceLevel, string> = {
   HIGH: "text-[var(--color-pass)] border-[var(--color-pass)]/40 bg-[var(--color-pass-soft)]",

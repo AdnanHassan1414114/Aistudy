@@ -30,27 +30,6 @@ export interface AudioChunk {
  * file should shell out to ffmpeg directly.
  */
 export class FfmpegAudioProvider {
-  /** Converts to mono, normalizes volume, and reduces bitrate for smaller/cheaper uploads. */
-  async optimize(inputPath: string, outputDir: string): Promise<string> {
-    const outputPath = path.join(outputDir, "optimized.wav");
-
-    await execFileAsync("ffmpeg", [
-      "-y",
-      "-i",
-      inputPath,
-      "-ac",
-      "1", // mono
-      "-ar",
-      "16000", // 16kHz is sufficient for speech and keeps files small
-      "-af",
-      "loudnorm", // normalize volume
-      outputPath,
-    ]);
-
-    logger.debug("Audio optimized", { inputPath, outputPath });
-    return outputPath;
-  }
-
   async getDurationSeconds(filePath: string): Promise<number> {
     try {
       const { stdout } = await execFileAsync("ffprobe", [

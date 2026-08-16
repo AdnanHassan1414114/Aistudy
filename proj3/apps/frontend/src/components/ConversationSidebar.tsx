@@ -1,4 +1,4 @@
-import type { Conversation } from "../types/chat";
+import type { Conversation } from "../types/chat.types.frontend";
 import { formatDateShort } from "../lib/format";
 
 export function ConversationSidebar({

@@ -5,6 +5,10 @@
 export type MessageRole = "USER" | "ASSISTANT";
 export type SourceBadgeType = "PERSONAL_KNOWLEDGE" | "EXTERNAL_AI";
 export type ConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
+/** Explicit lifecycle state for an ASSISTANT message. "Continue" is only
+ *  ever offered when status === "TRUNCATED" -- every other non-COMPLETE
+ *  state is deliberately not continuable. */
+export type MessageStatusType = "COMPLETE" | "TRUNCATED" | "STOPPED" | "INTERRUPTED" | "EMPTY";
 
 export interface KnowledgeReference {
   knowledgeId: string;
@@ -34,6 +38,12 @@ export interface Message {
   knowledgeRefs: KnowledgeReference[] | null;
   externalReason: string | null;
   savedToKnowledge: boolean;
+  /** True when `content` is a placeholder ("couldn't generate an answer")
+   *  or an interrupted/incomplete generation, rather than a real answer.
+   *  Save-to-Knowledge is hidden for these — there's nothing worth saving. */
+  isFallbackAnswer: boolean;
+  status: MessageStatusType | null;
+  continuationDepth: number;
   createdAt: string;
 }
 
@@ -46,6 +56,9 @@ export interface ChatAnswerSummary {
   topSimilarity: number;
   sourcesUsed: KnowledgeReference[];
   externalReason: string | null;
+  isFallbackAnswer: boolean;
+  status: MessageStatusType;
+  continuationDepth: number;
 }
 
 /** Knowledge scope options the composer offers -- matched against

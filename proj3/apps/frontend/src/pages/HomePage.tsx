@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { listKnowledge, ApiError } from "../lib/api";
-import type { Knowledge } from "../types/knowledge";
+import type { Knowledge } from "../types/knowledge.types.frontend";
 import { UrlSubmitForm } from "../components/UrlSubmitForm";
 import { KnowledgeGrid } from "../components/KnowledgeGrid";
 

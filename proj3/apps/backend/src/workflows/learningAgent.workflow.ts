@@ -1,4 +1,5 @@
 import { StateGraph, Annotation, START, END } from "@langchain/langgraph";
+import { randomUUID } from "crypto";
 import { InterviewStatus } from "@prisma/client";
 import { chatService } from "../services/chat.service";
 import { interviewService } from "../services/interview.service";
@@ -100,7 +101,15 @@ async function chatNode(state: LearningAgentStateType): Promise<Partial<Learning
   let errorMessage: string | null = null;
 
   await chatService.streamAnswer(
-    { question: state.userRequest, conversationId: state.conversationId },
+    {
+      question: state.userRequest,
+      conversationId: state.conversationId,
+      // The Learning Agent isn't a retry-prone HTTP caller in the same
+      // sense the /chat route is (no client resubmitting this exact
+      // request), so a fresh id per call satisfies the now-required field
+      // without needing real cross-request dedupe here.
+      clientRequestId: randomUUID(),
+    },
     {
       onDelta: (delta) => {
         content += delta;

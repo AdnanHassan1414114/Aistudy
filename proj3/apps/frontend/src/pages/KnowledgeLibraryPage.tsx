@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { listKnowledge, ApiError } from "../lib/api";
-import type { Knowledge, KnowledgeStatus } from "../types/knowledge";
+import type { Knowledge, KnowledgeStatus } from "../types/knowledge.types.frontend";
 import { SearchBar } from "../components/SearchBar";
 import { FilterBar } from "../components/FilterBar";
 import { KnowledgeGrid } from "../components/KnowledgeGrid";

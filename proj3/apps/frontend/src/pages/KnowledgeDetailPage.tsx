@@ -11,7 +11,7 @@ import {
   restoreKnowledgeVersion,
   updateKnowledgeNotes,
 } from "../lib/api";
-import type { Knowledge, KnowledgeVersion, ProcessingJob } from "../types/knowledge";
+import type { Knowledge, KnowledgeVersion, ProcessingJob } from "../types/knowledge.types.frontend";
 import { StatusBadge } from "../components/StatusBadge";
 import { JobProgressCard } from "../components/JobProgressCard";
 import { Markdown } from "../components/Markdown";

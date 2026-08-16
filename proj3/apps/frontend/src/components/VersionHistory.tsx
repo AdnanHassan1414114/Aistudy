@@ -1,4 +1,4 @@
-import type { KnowledgeVersion } from "../types/knowledge";
+import type { KnowledgeVersion } from "../types/knowledge.types.frontend";
 import { formatDate } from "../lib/format";
 
 export function VersionHistory({

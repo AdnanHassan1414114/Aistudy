@@ -30,8 +30,3 @@ if (env.NODE_ENV !== "production") {
     })
   );
 }
-
-/** Creates a child logger scoped to a request/job for correlated logs. */
-export function createScopedLogger(scope: Record<string, string>) {
-  return logger.child(scope);
-}

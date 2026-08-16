@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createKnowledge, ApiError } from "../lib/api";
-import { KNOWLEDGE_SCOPES } from "../types/chat";
+import { KNOWLEDGE_SCOPES } from "../types/chat.types.frontend";
 
 // Reuses the same topic list chat's scope filter already knows about
 // (minus "All Topics", which only means "no filter" there, not a real

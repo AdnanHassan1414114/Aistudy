@@ -1,4 +1,4 @@
-import type { Knowledge } from "../types/knowledge";
+import type { Knowledge } from "../types/knowledge.types.frontend";
 import { KnowledgeCard } from "./KnowledgeCard";
 
 export function KnowledgeGrid({
