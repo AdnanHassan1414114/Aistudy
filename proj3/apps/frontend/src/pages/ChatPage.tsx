@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
+  continueChat,
   getConversation,
   listConversations,
   saveAnswerToKnowledge,
@@ -43,8 +44,10 @@ export function ChatPage() {
   const [streamingReply, setStreamingReply] = useState<StreamingReply | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+  const [continuingMessageId, setContinuingMessageId] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const continueAbortControllerRef = useRef<AbortController | null>(null);
   const streamingContentRef = useRef("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -69,7 +72,9 @@ export function ChatPage() {
 
   const selectConversation = useCallback((id: string) => {
     abortControllerRef.current?.abort();
+    continueAbortControllerRef.current?.abort();
     setIsStreaming(false);
+    setContinuingMessageId(null);
     setStreamingReply(null);
     setActiveConversationId(id);
     setMessagesLoading(true);
@@ -94,7 +99,9 @@ export function ChatPage() {
 
   const startNewConversation = useCallback(() => {
     abortControllerRef.current?.abort();
+    continueAbortControllerRef.current?.abort();
     setIsStreaming(false);
+    setContinuingMessageId(null);
     setStreamingReply(null);
     setActiveConversationId(null);
     setActiveConversation(null);
@@ -120,6 +127,9 @@ export function ChatPage() {
       knowledgeRefs: null,
       externalReason: null,
       savedToKnowledge: false,
+      isFallbackAnswer: false,
+      status: null,
+      continuationDepth: 0,
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMessage]);
@@ -136,6 +146,10 @@ export function ChatPage() {
         question,
         conversationId: activeConversationId ?? undefined,
         knowledgeScope: scope === "All Topics" ? undefined : scope,
+        // Fresh key per send: if this exact request gets retried at the
+        // network level, the backend rejects the duplicate instead of
+        // creating a second copy of this message.
+        clientRequestId: crypto.randomUUID(),
       },
       {
         onDelta: (delta) => {
@@ -154,6 +168,9 @@ export function ChatPage() {
             knowledgeRefs: summary.sourcesUsed,
             externalReason: summary.externalReason,
             savedToKnowledge: false,
+            isFallbackAnswer: summary.isFallbackAnswer,
+            status: summary.status,
+            continuationDepth: summary.continuationDepth,
             createdAt: new Date().toISOString(),
           };
           setMessages((prev) => [...prev, assistantMessage]);
@@ -172,10 +189,36 @@ export function ChatPage() {
           }
           loadConversations();
         },
-        onError: (message) => {
+        onError: (message, options) => {
           setError(message);
-          setStreamingReply(null);
           setIsStreaming(false);
+
+          // `preserveContent` means the answer was actually generated and
+          // already shown -- only saving it failed. Wiping the bubble in
+          // that case would throw away a real, complete answer over a
+          // problem that has nothing to do with the answer itself.
+          if (options?.preserveContent && streamingContentRef.current.trim()) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: localId(),
+                conversationId: activeConversationId ?? "",
+                role: "ASSISTANT",
+                content: streamingContentRef.current,
+                sourceBadge: null,
+                confidence: null,
+                topSimilarity: null,
+                knowledgeRefs: null,
+                externalReason: "This answer could not be saved -- copy it if you need to keep it.",
+                savedToKnowledge: false,
+                isFallbackAnswer: true,
+                status: "INTERRUPTED",
+                continuationDepth: 0,
+                createdAt: new Date().toISOString(),
+              },
+            ]);
+          }
+          setStreamingReply(null);
         },
       },
       controller.signal
@@ -203,6 +246,9 @@ export function ChatPage() {
           knowledgeRefs: null,
           externalReason: "Generation was stopped before it finished.",
           savedToKnowledge: false,
+          isFallbackAnswer: true,
+          status: "STOPPED",
+          continuationDepth: 0,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -213,13 +259,67 @@ export function ChatPage() {
   const handleSaveToKnowledge = useCallback((messageId: string) => {
     setSavingMessageId(messageId);
     saveAnswerToKnowledge(messageId)
-      .then(() => {
+      .then((result) => {
         setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, savedToKnowledge: true } : m)));
+        // The note was created either way -- but if indexing failed it
+        // won't show up in any chat/interview search yet. Say so rather
+        // than letting the button's "Saved" state imply it's fully ready.
+        if (!result.indexed) {
+          setError(
+            "Saved, but this note isn't searchable yet (indexing failed). It will still appear in your Knowledge Library and can be reindexed from there."
+          );
+        }
       })
       .catch((err) => {
         setError(err instanceof ApiError ? err.message : "Could not save this answer.");
       })
       .finally(() => setSavingMessageId(null));
+  }, []);
+
+  const handleContinue = useCallback((messageId: string) => {
+    setContinuingMessageId(messageId);
+    setError(null);
+
+    const controller = new AbortController();
+    continueAbortControllerRef.current = controller;
+
+    continueChat(
+      messageId,
+      {
+        // Continuation deltas are appended onto the EXISTING message's
+        // content rather than starting a new bubble -- this is the core
+        // of what makes Continue feel seamless instead of duplicating or
+        // restarting the answer.
+        onDelta: (delta) => {
+          setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, content: m.content + delta } : m)));
+        },
+        onDone: (summary: ChatAnswerSummary) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === messageId
+                ? {
+                    ...m,
+                    status: summary.status,
+                    continuationDepth: summary.continuationDepth,
+                  }
+                : m
+            )
+          );
+          setContinuingMessageId(null);
+        },
+        onError: (message, options) => {
+          setError(message);
+          // The deltas already appended via onDelta stay in place either
+          // way -- preserveContent here just means "don't additionally
+          // roll them back", which this handler never did in the first
+          // place, so there's nothing extra to do beyond surfacing the
+          // message and clearing the in-flight state.
+          void options;
+          setContinuingMessageId(null);
+        },
+      },
+      controller.signal
+    );
   }, []);
 
   const showEmptyState = !messagesLoading && messages.length === 0 && !streamingReply;
@@ -277,10 +377,16 @@ export function ChatPage() {
                   knowledgeRefs={m.knowledgeRefs}
                   externalReason={m.externalReason}
                   savedToKnowledge={m.savedToKnowledge}
+                  isFallbackAnswer={m.isFallbackAnswer}
+                  status={m.status}
                   onSaveToKnowledge={
-                    m.sourceBadge === "EXTERNAL_AI" ? () => handleSaveToKnowledge(m.id) : undefined
+                    m.sourceBadge === "EXTERNAL_AI" && !m.isFallbackAnswer
+                      ? () => handleSaveToKnowledge(m.id)
+                      : undefined
                   }
                   saving={savingMessageId === m.id}
+                  onContinue={m.status === "TRUNCATED" ? () => handleContinue(m.id) : undefined}
+                  continuing={continuingMessageId === m.id}
                 />
               ))}
 

@@ -1,4 +1,4 @@
-import type { ConfidenceLevel, KnowledgeReference, MessageRole, SourceBadgeType } from "../types/chat";
+import type { ConfidenceLevel, KnowledgeReference, MessageRole, MessageStatusType, SourceBadgeType } from "../types/chat";
 import { Markdown } from "./Markdown";
 import { ChatSourceBadge } from "./ChatSourceBadge";
 import { ConfidenceBadge } from "./ConfidenceBadge";
@@ -12,9 +12,13 @@ export function ChatMessage({
   knowledgeRefs,
   externalReason,
   savedToKnowledge,
+  isFallbackAnswer,
+  status,
   isStreaming,
   onSaveToKnowledge,
   saving,
+  onContinue,
+  continuing,
 }: {
   role: MessageRole;
   content: string;
@@ -23,9 +27,16 @@ export function ChatMessage({
   knowledgeRefs?: KnowledgeReference[] | null;
   externalReason?: string | null;
   savedToKnowledge?: boolean;
+  /** Placeholder/interrupted content -- there's nothing real to save. */
+  isFallbackAnswer?: boolean;
+  /** Explicit lifecycle state -- the Continue affordance below only ever
+   *  renders for "TRUNCATED". */
+  status?: MessageStatusType | null;
   isStreaming?: boolean;
   onSaveToKnowledge?: () => void;
   saving?: boolean;
+  onContinue?: () => void;
+  continuing?: boolean;
 }) {
   const isUser = role === "USER";
 
@@ -76,7 +87,18 @@ export function ChatMessage({
           </div>
         )}
 
-        {!isUser && sourceBadge === "EXTERNAL_AI" && onSaveToKnowledge && !isStreaming && (
+        {!isUser && status === "TRUNCATED" && onContinue && !isStreaming && (
+          <button
+            type="button"
+            onClick={onContinue}
+            disabled={continuing}
+            className="mt-1.5 mr-1.5 rounded-md border border-[var(--color-rule-strong)] px-2.5 py-1 font-body text-xs font-medium text-[var(--color-ink)] transition-colors hover:bg-[var(--color-accent-soft)]/50 disabled:opacity-50"
+          >
+            {continuing ? "Continuing..." : "Cut off -- Continue"}
+          </button>
+        )}
+
+        {!isUser && sourceBadge === "EXTERNAL_AI" && !isFallbackAnswer && onSaveToKnowledge && !isStreaming && (
           <button
             type="button"
             onClick={onSaveToKnowledge}

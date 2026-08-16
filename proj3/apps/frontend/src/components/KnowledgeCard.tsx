@@ -31,7 +31,17 @@ export function KnowledgeCard({ knowledge }: { knowledge: Knowledge }) {
           <StatusBadge status={knowledge.status} />
         </div>
 
+        {knowledge.status === "COMPLETED" && knowledge.indexingFailedAt && !knowledge.indexedAt && (
+          <p
+            className="w-fit rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-mono text-[11px] text-amber-800"
+            title="This lecture's notes exist but aren't showing up in chat or interview searches yet. Open it and retry indexing."
+          >
+            Not searchable yet
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-[var(--color-ink-soft)]">
+          {knowledge.origin === "CHAT_SAVE" && <span className="truncate">Saved from chat</span>}
           {knowledge.channelName && <span className="truncate">{knowledge.channelName}</span>}
           {knowledge.duration !== null && (
             <>
