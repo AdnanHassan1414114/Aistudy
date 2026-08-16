@@ -70,6 +70,21 @@ model Knowledge {
   origin        KnowledgeOrigin  @default(LECTURE) // LECTURE (M1 pipeline) or CHAT_SAVE (saved from an External AI chat answer)
   chunks        KnowledgeChunk[]
 
+  // When RAG indexing (chunk + embed + store) last succeeded/failed for
+  // this Knowledge. `status = COMPLETED` only means the M1 pipeline (or
+  // chat-save conversion) finished — it says nothing about whether the
+  // notes are actually searchable, which is what these two fields are
+  // for. Both null means indexing has simply never run yet.
+  indexedAt        DateTime?
+  indexingFailedAt DateTime?
+
+  // Set only for origin=CHAT_SAVE: the Message this Knowledge was created
+  // from. The unique constraint is what actually prevents two concurrent
+  // "Save to Knowledge Base" clicks on the same message from producing two
+  // Knowledge rows — the Message.savedKnowledgeId flag alone is a fast-path
+  // check, not a guarantee under a race.
+  sourceMessageId String? @unique
+
   // AI provenance — kept for reproducibility, useful for future milestones
   aiProvider    String?
   aiModel       String?
@@ -296,6 +311,20 @@ enum ConfidenceLevel {
   LOW
 }
 
+// Explicit lifecycle state for an ASSISTANT message, replacing what used
+// to be inferred loosely from isFallbackAnswer + externalReason text.
+// TRUNCATED is the only state "Continue" is ever allowed from — the other
+// non-COMPLETE states are deliberately NOT continuable (a stopped or
+// provider-interrupted answer is not the same situation as one that was
+// cut off purely by the output-token limit).
+enum MessageStatus {
+  COMPLETE // normal, full answer
+  TRUNCATED // hit CHAT_MAX_TOKENS — Continue is allowed
+  STOPPED // user clicked Stop — Continue is NOT allowed
+  INTERRUPTED // provider failed mid-stream — Continue is NOT allowed
+  EMPTY // model returned nothing; EMPTY_ANSWER_FALLBACK text was used
+}
+
 model Message {
   id String @id @default(uuid())
 
@@ -312,6 +341,31 @@ model Message {
   knowledgeRefs    Json? // [{ knowledgeId, title, heading, section, similarity }]
   externalReason   String? // e.g. "This topic was not found in your personal knowledge."
   savedToKnowledge Boolean          @default(false)
+  // Set once this message has actually been converted into a Knowledge
+  // entry (see KnowledgeSaveService). Authoritative pointer used to make
+  // "Save to Knowledge Base" idempotent — a repeat save request returns
+  // the existing Knowledge instead of creating a duplicate.
+  savedKnowledgeId String?
+  // True when `content` is EMPTY_ANSWER_FALLBACK ("I wasn't able to
+  // generate an answer...") rather than a real model response. Used to
+  // stop this placeholder text from being saved to the Knowledge Base
+  // and from being shown with a confidence/source badge as if it were
+  // a grounded answer.
+  isFallbackAnswer Boolean          @default(false)
+  // Optional client-generated idempotency key for the /chat endpoint.
+  // A request retried with the same key is rejected instead of creating
+  // a duplicate user/assistant message pair.
+  clientRequestId  String?          @unique
+  status           MessageStatus?   // null for USER messages; set for ASSISTANT messages
+  // Exact chunk content (title/heading/section/content) actually used to
+  // build the prompt for this answer, captured verbatim at generation
+  // time. Continue reuses this instead of re-running retrieval, so the
+  // continuation can't drift onto different source material than the
+  // first half of the answer was grounded in.
+  retrievedContext Json?
+  // How many times this message has been extended via Continue. Capped
+  // (see MAX_CONTINUATION_DEPTH in chat.service.ts) to bound cost/abuse.
+  continuationDepth Int             @default(0)
 
   createdAt DateTime @default(now())
 
