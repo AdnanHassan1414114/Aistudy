@@ -15,6 +15,7 @@ export interface CreateKnowledgeData {
   language?: string | null;
   category?: string | null;
   origin?: KnowledgeOrigin;
+  sourceMessageId?: string | null;
 }
 
 export interface KnowledgeListFilters extends PaginationParams {
@@ -37,6 +38,13 @@ export class KnowledgeRepository {
 
   async findByVideoId(youtubeVideoId: string): Promise<Knowledge | null> {
     return prisma.knowledge.findUnique({ where: { youtubeVideoId } });
+  }
+
+  /** Used by KnowledgeSaveService to make "Save to Knowledge Base" idempotent:
+   *  a Knowledge row already exists for this source message, so a repeat
+   *  save request should return it instead of creating a duplicate. */
+  async findBySourceMessageId(sourceMessageId: string): Promise<Knowledge | null> {
+    return prisma.knowledge.findUnique({ where: { sourceMessageId } });
   }
 
   async create(data: CreateKnowledgeData): Promise<Knowledge> {
